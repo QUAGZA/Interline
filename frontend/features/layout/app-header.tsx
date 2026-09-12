@@ -1,0 +1,197 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
+import { useAccount, useConnect, useDisconnect, useEnsName, useSwitchChain } from "wagmi";
+import { V2_CHAINS, chainName, parseRouteChainId, type V2ChainId } from "@/lib/chains";
+import { defaultV2ChainId } from "@/lib/config";
+import { shortAddr } from "@/lib/format";
+import { cn } from "@/lib/utils";
+
+const NAV = [
+  { href: "/markets", label: "Markets", match: (p: string) => p.startsWith("/markets") },
+  { href: "/desk", label: "Public desk", match: (p: string) => p === "/desk" || p.startsWith("/positions") },
+  { href: "/dashboard", label: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
+];
+
+function viewingChainFromPath(pathname: string, search: URLSearchParams, fallback: V2ChainId): V2ChainId {
+  const parts = pathname.split("/").filter(Boolean);
+  if (
+    (parts[0] === "markets" || parts[0] === "positions" || parts[0] === "accounts") &&
+    parts[1]
+  ) {
+    return parseRouteChainId(parts[1]) ?? fallback;
+  }
+  return parseRouteChainId(search.get("chainId") ?? undefined) ?? fallback;
+}
+
+export function AppHeader() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const viewing = viewingChainFromPath(pathname, searchParams, defaultV2ChainId);
+
+  const { address, isConnected, chainId: walletChainId } = useAccount();
+  const { connect, connectors, isPending } = useConnect();
+  const { disconnect } = useDisconnect();
+  const { switchChain, isPending: switching } = useSwitchChain();
+  const { data: ens } = useEnsName({ address, query: { enabled: Boolean(address) } });
+
+  const walletMismatch = isConnected && walletChainId !== viewing;
+
+  function setViewChain(id: V2ChainId) {
+    const parts = pathname.split("/").filter(Boolean);
+    if (
+      (parts[0] === "markets" || parts[0] === "positions" || parts[0] === "accounts") &&
+      parts[1] &&
+      parseRouteChainId(parts[1])
+    ) {
+      const next = ["", parts[0], String(id), ...parts.slice(2)].join("/");
+      router.push(next);
+      return;
+    }
+    const sp = new URLSearchParams(searchParams.toString());
+    sp.set("chainId", String(id));
+    const q = sp.toString();
+    router.push(`${pathname}${q ? `?${q}` : ""}`);
+  }
+
+  return (
+    <header className="sticky top-0 z-50 border-b border-border/40 bg-background/95 backdrop-blur">
+      <div className="flex h-14 items-center gap-3 px-4 md:px-6">
+        <Link href="/" className="font-[var(--font-bebas)] text-xl tracking-wide text-foreground hover:text-accent">
+          INTERLINE
+        </Link>
+        <nav className="hidden md:flex items-center gap-5 ml-6" aria-label="Application">
+          {NAV.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={cn(
+                "font-mono text-[11px] uppercase tracking-widest",
+                item.match(pathname) ? "text-accent" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        <button
+          type="button"
+          className="md:hidden ml-auto border border-border px-3 py-1 font-mono text-[10px] uppercase tracking-widest"
+          aria-expanded={open}
+          aria-controls="mobile-menu"
+          onClick={() => setOpen((v) => !v)}
+        >
+          Menu
+        </button>
+        <div className="ml-auto hidden md:flex items-center gap-3">
+          <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Network
+            <select
+              className="border border-border bg-background px-2 py-1 text-foreground"
+              value={viewing}
+              onChange={(e) => setViewChain(Number(e.target.value) as V2ChainId)}
+            >
+              {V2_CHAINS.map((c) => (
+                <option key={c.chainId} value={c.chainId}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {walletMismatch ? (
+            <button
+              type="button"
+              disabled={switching}
+              onClick={() => switchChain({ chainId: viewing })}
+              className="border border-destructive px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-destructive"
+            >
+              Switch wallet to {chainName(viewing)}
+            </button>
+          ) : null}
+          {isConnected ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href="/dashboard"
+                className="font-mono text-xs text-foreground hover:text-accent"
+                title={address}
+              >
+                {ens ?? shortAddr(address)}
+              </Link>
+              <button
+                type="button"
+                onClick={() => disconnect()}
+                className="border border-foreground/20 px-2 py-1 font-mono text-[10px] uppercase tracking-widest hover:border-accent hover:text-accent"
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            connectors.slice(0, 1).map((c) => (
+              <button
+                key={c.uid}
+                type="button"
+                disabled={isPending}
+                onClick={() => connect({ connector: c })}
+                className="border border-accent bg-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent-foreground"
+              >
+                Connect
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+      {open ? (
+        <div id="mobile-menu" className="md:hidden border-t border-border/40 px-4 py-3 space-y-3">
+          {NAV.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setOpen(false)}
+              className="block font-mono text-xs uppercase tracking-widest text-foreground"
+            >
+              {item.label}
+            </Link>
+          ))}
+          <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Network
+            <select
+              className="border border-border bg-background px-2 py-1 text-foreground"
+              value={viewing}
+              onChange={(e) => setViewChain(Number(e.target.value) as V2ChainId)}
+            >
+              {V2_CHAINS.map((c) => (
+                <option key={c.chainId} value={c.chainId}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {isConnected ? (
+            <div className="space-y-2">
+              <p className="font-mono text-xs">{ens ?? shortAddr(address)}</p>
+              <button type="button" onClick={() => disconnect()} className="font-mono text-[10px] uppercase tracking-widest">
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            connectors.map((c) => (
+              <button
+                key={c.uid}
+                type="button"
+                disabled={isPending}
+                onClick={() => connect({ connector: c })}
+                className="block w-full border border-accent bg-accent px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-accent-foreground"
+              >
+                Connect {c.name}
+              </button>
+            ))
+          )}
+        </div>
+      ) : null}
+    </header>
+  );
+}

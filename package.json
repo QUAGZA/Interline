@@ -1,0 +1,22 @@
+{
+  "name": "interline",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "frontend",
+    "server",
+    "keeper"
+  ],
+  "scripts": {
+    "test:math": "npm run test -w @interline/math",
+    "dev:frontend": "npm run dev -w frontend",
+    "dev:api": "npm run start -w interline-indexer",
+    "export:abis": "node --experimental-strip-types tools/export-abis.ts",
+    "keeper": "npm run start -w @interline/keeper",
+    "test:e2e": "npm run test:e2e -w frontend",
+    "test:api": "npm run test -w interline-indexer"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

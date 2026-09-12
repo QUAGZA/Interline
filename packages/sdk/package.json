@@ -1,0 +1,17 @@
+{
+  "name": "@interline/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@interline/api-types": "0.1.0",
+    "@interline/math": "0.1.0",
+    "@interline/protocol": "0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

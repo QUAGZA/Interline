@@ -5,6 +5,7 @@ import { mockTargetAddress } from "@/lib/env";
 import { formatBps, formatDeadline, formatUsdc, shortAddr } from "@/lib/format";
 import { useEvents } from "@/hooks/useEvents";
 import { useLineState } from "@/hooks/useLineState";
+import { cn } from "@/lib/utils";
 
 function Stat({
   label,
@@ -16,9 +17,14 @@ function Stat({
   alert?: boolean;
 }) {
   return (
-    <div className={`rounded-lg border px-4 py-3 ${alert ? "border-red-700 bg-red-950/40" : "border-zinc-800 bg-zinc-900/50"}`}>
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-1 font-mono text-lg tabular-nums text-zinc-100">{value}</div>
+    <div
+      className={cn(
+        "border px-4 py-3 bg-card",
+        alert ? "border-destructive/70" : "border-border/50",
+      )}
+    >
+      <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">{label}</div>
+      <div className="mt-2 font-mono text-lg tabular-nums text-foreground">{value}</div>
     </div>
   );
 }
@@ -37,26 +43,30 @@ export function Board() {
 
   if (!s.ready) {
     return (
-      <section className="p-6 text-zinc-400">
-        <h2 className="text-lg font-semibold text-zinc-100">Board</h2>
-        <p className="mt-2 max-w-xl text-sm">
+      <section id="board" className="relative pt-24 pb-16 pl-6 md:pl-12 pr-6 md:pr-12">
+        <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">01 / Board</span>
+        <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">PUBLIC DESK</h2>
+        <p className="mt-6 max-w-xl font-mono text-sm text-muted-foreground leading-relaxed">
           No contract addresses in env. Deploy with Foundry, then copy the printed{" "}
-          <code className="text-amber-300">NEXT_PUBLIC_*</code> values into{" "}
-          <code className="text-amber-300">frontend/.env.local</code> and restart the app.
+          <code className="text-accent">NEXT_PUBLIC_*</code> values into{" "}
+          <code className="text-accent">frontend/.env.local</code> and restart the app.
         </p>
       </section>
     );
   }
 
   return (
-    <section className="space-y-5 p-6">
-      <div className="flex items-end justify-between gap-4">
+    <section id="board" className="relative pt-24 pb-16 pl-6 md:pl-12 pr-6 md:pr-12">
+      <div className="mb-16 flex items-end justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-zinc-100">Board</h2>
-          <p className="text-xs text-zinc-500">Public. Wallet not required. Refetch every block.</p>
+          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent">01 / Board</span>
+          <h2 className="mt-4 font-[var(--font-bebas)] text-5xl md:text-7xl tracking-tight">PUBLIC DESK</h2>
+          <p className="mt-3 font-mono text-xs text-muted-foreground">
+            Wallet not required. Refetch every block.
+          </p>
         </div>
         {hot ? (
-          <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs font-medium text-red-300">
+          <span className="border border-destructive/70 px-3 py-1 font-mono text-[10px] uppercase tracking-widest text-destructive">
             {s.recallActive ? "RECALL" : "DRAWS PAUSED"}
           </span>
         ) : null}
@@ -77,25 +87,25 @@ export function Board() {
         <Stat label="Rate (display)" value={s.rateBps !== undefined ? `${Number(s.rateBps) / 100}%` : "—"} />
       </div>
 
-      <div>
-        <div className="mb-1 flex justify-between text-xs text-zinc-500">
+      <div className="mt-10">
+        <div className="mb-2 flex justify-between font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
           <span>Utilisation</span>
-          <span className="font-mono tabular-nums">{util.toFixed(2)}%</span>
+          <span className="tabular-nums">{util.toFixed(2)}%</span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
+        <div className="h-2 overflow-hidden border border-border bg-secondary">
           <div
-            className={`h-full ${hot ? "bg-red-500" : "bg-amber-400"}`}
+            className={cn("h-full", hot ? "bg-destructive" : "bg-accent")}
             style={{ width: `${util}%` }}
           />
         </div>
       </div>
 
-      <div className="rounded-lg border border-zinc-800">
-        <div className="border-b border-zinc-800 px-4 py-2 text-xs uppercase tracking-wide text-zinc-500">
+      <div className="mt-10 border border-border/50 bg-card">
+        <div className="border-b border-border/50 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
           Exposure
         </div>
         <table className="w-full text-sm">
-          <thead className="text-left text-xs text-zinc-500">
+          <thead className="text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             <tr>
               <th className="px-4 py-2">Target</th>
               <th className="px-4 py-2">USDC sent</th>
@@ -103,12 +113,12 @@ export function Board() {
             </tr>
           </thead>
           <tbody className="font-mono tabular-nums">
-            <tr className="border-t border-zinc-800">
-              <td className="px-4 py-2 text-zinc-200">
+            <tr className="border-t border-border/40">
+              <td className="px-4 py-2 text-foreground">
                 MockTarget {shortAddr(mockTargetAddress)}
               </td>
               <td className="px-4 py-2">{formatUsdc(s.exposure)}</td>
-              <td className={`px-4 py-2 ${s.venuePaused ? "text-red-300" : "text-zinc-400"}`}>
+              <td className={cn("px-4 py-2", s.venuePaused ? "text-destructive" : "text-muted-foreground")}>
                 {s.venuePaused ? "yes" : "no"}
               </td>
             </tr>
@@ -116,19 +126,19 @@ export function Board() {
         </table>
       </div>
 
-      <div className="rounded-lg border border-zinc-800">
-        <div className="border-b border-zinc-800 px-4 py-2 text-xs uppercase tracking-wide text-zinc-500">
+      <div className="mt-10 border border-border/50 bg-card">
+        <div className="border-b border-border/50 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
           Last 15 events
         </div>
         <ul className="max-h-64 overflow-auto text-sm">
           {events.length === 0 ? (
-            <li className="px-4 py-3 text-zinc-500">No events yet.</li>
+            <li className="px-4 py-3 font-mono text-xs text-muted-foreground">No events yet.</li>
           ) : (
             events.map((e) => (
-              <li key={e.id} className="border-t border-zinc-800/80 px-4 py-2 font-mono text-xs text-zinc-300">
-                <span className="text-amber-300">{e.label}</span>
-                <span className="ml-2 text-zinc-600">#{e.block.toString()}</span>
-                <span className="ml-2 text-zinc-400">{e.detail}</span>
+              <li key={e.id} className="border-t border-border/30 px-4 py-2 font-mono text-xs text-foreground/80">
+                <span className="text-accent">{e.label}</span>
+                <span className="ml-2 text-muted-foreground">#{e.block.toString()}</span>
+                <span className="ml-2 text-muted-foreground">{e.detail}</span>
               </li>
             ))
           )}

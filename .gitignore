@@ -19,6 +19,8 @@ frontend/.next/
 frontend/out/
 server/node_modules/
 server/dist/
+packages/*/node_modules/
+keeper/node_modules/
 
 # OS / editor
 .DS_Store

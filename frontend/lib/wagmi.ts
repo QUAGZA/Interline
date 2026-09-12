@@ -1,8 +1,8 @@
-import { createConfig, http, injected } from "wagmi";
-import { walletConnect } from "wagmi/connectors";
+import { createConfig, http } from "wagmi";
+import { injected } from "@wagmi/connectors/injected";
 import { baseSepolia, sepolia } from "wagmi/chains";
 import { defineChain } from "viem";
-import { chainId, rpcUrl, walletConnectProjectId } from "./env";
+import { chainId, rpcUrl } from "./env";
 
 export const anvil = defineChain({
   id: 31337,
@@ -13,24 +13,31 @@ export const anvil = defineChain({
   },
 });
 
-const connectors = walletConnectProjectId
-  ? [injected(), walletConnect({ projectId: walletConnectProjectId })]
-  : [injected()];
+const connectors = [injected()];
 
 function rpcFor(id: number): string {
   if (id === chainId) return rpcUrl;
   if (id === 84532) return "https://sepolia.base.org";
-  if (id === 11155111) return "https://rpc.sepolia.org";
+  if (id === 11155111) return "https://ethereum-sepolia-rpc.publicnode.com";
   return rpcUrl;
+}
+
+function transport(id: number) {
+  return http(rpcFor(id), {
+    timeout: 12_000,
+    retryCount: 1,
+    batch: true,
+  });
 }
 
 export const config = createConfig({
   chains: [anvil, baseSepolia, sepolia],
   connectors,
   transports: {
-    [anvil.id]: http(rpcFor(anvil.id)),
-    [baseSepolia.id]: http(rpcFor(baseSepolia.id)),
-    [sepolia.id]: http(rpcFor(sepolia.id)),
+    [anvil.id]: transport(anvil.id),
+    [baseSepolia.id]: transport(baseSepolia.id),
+    [sepolia.id]: transport(sepolia.id),
   },
   ssr: true,
+  pollingInterval: chainId === 31337 ? 2_000 : 12_000,
 });

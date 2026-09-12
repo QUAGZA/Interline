@@ -1,0 +1,17 @@
+{
+  "name": "@interline/keeper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@interline/protocol": "0.1.0",
+    "viem": "2.56.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "5.9.3"
+  }
+}

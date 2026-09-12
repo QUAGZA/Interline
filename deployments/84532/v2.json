@@ -1,0 +1,36 @@
+{
+  "chainId": 84532,
+  "factory": "0x0000000000000000000000000000000000000000",
+  "vaultFactory": "0x0000000000000000000000000000000000000000",
+  "recoveryEscrow": "0x0000000000000000000000000000000000000000",
+  "lens": "0x0000000000000000000000000000000000000000",
+  "startBlock": 0,
+  "oracleMode": "simulated",
+  "faucet": "0x0000000000000000000000000000000000000000",
+  "loanToken": "0x0000000000000000000000000000000000000000",
+  "collateralToken": "0x0000000000000000000000000000000000000000",
+  "swapRouter": "0x0000000000000000000000000000000000000000",
+  "venue": "0x0000000000000000000000000000000000000000",
+  "curator": "0x0000000000000000000000000000000000000000",
+  "guardian": "0x0000000000000000000000000000000000000000",
+  "markets": [
+    {
+      "id": "usdc-weth-wallet",
+      "address": "0x0000000000000000000000000000000000000000",
+      "label": "mUSDC / mWETH - Wallet",
+      "deliveryMode": "wallet",
+      "loanSymbol": "mUSDC",
+      "collateralSymbol": "mWETH",
+      "oracle": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "id": "usdc-weth-restricted",
+      "address": "0x0000000000000000000000000000000000000000",
+      "label": "mUSDC / mWETH - Restricted",
+      "deliveryMode": "restricted",
+      "loanSymbol": "mUSDC",
+      "collateralSymbol": "mWETH",
+      "oracle": "0x0000000000000000000000000000000000000000"
+    }
+  ]
+}

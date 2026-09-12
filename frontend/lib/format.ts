@@ -1,4 +1,5 @@
 import { formatUnits, parseUnits } from "viem";
+import { decToDisplay } from "./money";
 
 export const USDC_DECIMALS = 6;
 
@@ -8,11 +9,21 @@ export function parseUsdc(human: string): bigint {
   return parseUnits(trimmed, USDC_DECIMALS);
 }
 
+export function parseTokenInput(human: string, decimals: number): bigint {
+  const trimmed = human.trim();
+  if (!trimmed) return 0n;
+  return parseUnits(trimmed, decimals);
+}
+
+/** Display-only. Uses decimal.js — not JS Number — for token amounts. */
 export function formatUsdc(base: bigint | undefined): string {
   if (base === undefined) return "—";
-  const asNumber = Number(formatUnits(base, USDC_DECIMALS));
-  if (!Number.isFinite(asNumber)) return formatUnits(base, USDC_DECIMALS);
-  return asNumber.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return decToDisplay(base, USDC_DECIMALS, 2);
+}
+
+export function formatTokenUnits(base: bigint | undefined, decimals: number): string {
+  if (base === undefined) return "—";
+  return decToDisplay(base, decimals, Math.min(decimals, 6));
 }
 
 export function shortAddr(value?: string): string {
@@ -20,9 +31,10 @@ export function shortAddr(value?: string): string {
   return `${value.slice(0, 6)}…${value.slice(-4)}`;
 }
 
-export function formatBps(bps: bigint | undefined): string {
+export function formatBps(bps: bigint | number | undefined): string {
   if (bps === undefined) return "—";
-  return `${(Number(bps) / 100).toFixed(2)}%`;
+  const raw = typeof bps === "bigint" ? bps.toString() : String(Math.trunc(bps));
+  return `${decToDisplay(raw, 2, 2)}%`;
 }
 
 export function formatDeadline(unix: bigint | undefined, nowSec: number): string {
@@ -33,3 +45,5 @@ export function formatDeadline(unix: bigint | undefined, nowSec: number): string
   const s = remaining % 60;
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
+
+export { formatUnits, parseUnits };

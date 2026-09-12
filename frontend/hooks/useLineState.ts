@@ -1,19 +1,36 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { erc20Abi } from "viem";
 import { useBlockNumber, useReadContracts } from "wagmi";
 import { creditLineAbi, vaultAbi } from "@/lib/abi";
 import {
   addressesReady,
+  chainId,
   creditLineAddress,
   mockTargetAddress,
   usdcAddress,
   vaultAddress,
 } from "@/lib/env";
 
+const pollMs = chainId === 31337 ? 2_000 : 12_000;
+
 export function useLineState() {
-  const { data: blockNumber } = useBlockNumber({ watch: true });
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    setLive(true);
+  }, []);
+
+  const enabled = live && addressesReady;
+
+  const { data: blockNumber } = useBlockNumber({
+    query: {
+      enabled,
+      refetchInterval: pollMs,
+      refetchIntervalInBackground: false,
+      staleTime: pollMs,
+    },
+  });
 
   const line = creditLineAddress ?? "0x0000000000000000000000000000000000000001";
   const vault = vaultAddress ?? "0x0000000000000000000000000000000000000001";
@@ -41,11 +58,17 @@ export function useLineState() {
       { address: usdc, abi: erc20Abi, functionName: "balanceOf", args: [vault] },
       { address: vault, abi: vaultAbi, functionName: "exposure", args: [target] },
     ],
-    query: { enabled: addressesReady },
+    query: {
+      enabled,
+      staleTime: pollMs,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
   });
 
   useEffect(() => {
-    if (blockNumber !== undefined) void query.refetch();
+    if (blockNumber === undefined || query.isFetching) return;
+    void query.refetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blockNumber]);
 

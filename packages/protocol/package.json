@@ -1,0 +1,11 @@
+{
+  "name": "@interline/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./abis": "./src/abis.ts",
+    "./deployments": "./src/deployments.ts"
+  }
+}
