@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useAccount, useConnect, useDisconnect, useEnsName, useSwitchChain } from "wagmi";
+import { useAccount, useSwitchChain } from "wagmi";
 import { V2_CHAINS, chainName, parseRouteChainId, viewingChainFromPath, type V2ChainId } from "@/lib/chains";
 import { defaultV2ChainId } from "@/lib/config";
 import { useAppPrefs } from "@/features/settings/prefs";
-import { shortAddr } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { WalletStrip } from "@/components/ui/wallet-strip";
+import { ConnectButton, DisconnectButton } from "@/components/connect-button";
+import { EnsLabel } from "@/components/ens-label";
 
 const NAV = [
   { href: "/markets", label: "Markets", match: (p: string) => p.startsWith("/markets") },
@@ -25,10 +26,7 @@ export function AppHeader() {
   const viewing = viewingChainFromPath(pathname, searchParams, prefs.defaultChainId ?? defaultV2ChainId);
 
   const { address, isConnected, chainId: walletChainId } = useAccount();
-  const { connect, connectors, isPending } = useConnect();
-  const { disconnect } = useDisconnect();
   const { switchChain, isPending: switching } = useSwitchChain();
-  const { data: ens } = useEnsName({ address, query: { enabled: Boolean(address) } });
 
   const walletMismatch = isConnected && walletChainId !== viewing;
 
@@ -117,23 +115,13 @@ export function AppHeader() {
             {isConnected ? (
               <div className="space-y-2">
                 <WalletStrip chainId={viewing} />
-                <p className="font-mono text-xs">{ens ?? shortAddr(address)}</p>
-                <button type="button" onClick={() => disconnect()} className="font-mono text-[10px] uppercase tracking-widest">
-                  Disconnect
-                </button>
+                <p className="font-mono text-xs">
+                  <EnsLabel address={address} />
+                </p>
+                <DisconnectButton />
               </div>
             ) : (
-              connectors.map((c) => (
-                <button
-                  key={c.uid}
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => connect({ connector: c })}
-                  className="block w-full border border-accent bg-accent px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-accent-foreground"
-                >
-                  Connect {c.name}
-                </button>
-              ))
+              <ConnectButton className="block w-full" />
             )}
           </div>
         </details>
@@ -170,28 +158,12 @@ export function AppHeader() {
                 className="font-mono text-xs text-foreground hover:text-accent"
                 title={address}
               >
-                {ens ?? shortAddr(address)}
+                <EnsLabel address={address} />
               </Link>
-              <button
-                type="button"
-                onClick={() => disconnect()}
-                className="border border-foreground/20 px-2 py-1 font-mono text-[10px] uppercase tracking-widest hover:border-accent hover:text-accent"
-              >
-                Disconnect
-              </button>
+              <DisconnectButton />
             </div>
           ) : (
-            connectors.slice(0, 1).map((c) => (
-              <button
-                key={c.uid}
-                type="button"
-                disabled={isPending}
-                onClick={() => connect({ connector: c })}
-                className="border border-accent bg-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent-foreground"
-              >
-                Connect
-              </button>
-            ))
+            <ConnectButton />
           )}
         </div>
       </div>

@@ -21,6 +21,7 @@ import {
   rpcPortfolio,
   rpcPosition,
 } from "@/lib/onchain-catalog";
+import { fetchGraphActivity } from "@/lib/graph";
 import {
   emptyPosition,
   mapChain,
@@ -70,19 +71,21 @@ function qs(params: Record<string, string | number | undefined>): string {
 }
 
 async function getJson(path: string): Promise<{ ok: true; status: number; json: unknown } | { ok: false }> {
+  if (!apiBaseUrl) return { ok: false };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 4000);
     const res = await fetch(`${apiBaseUrl}${path}`, {
       signal: ctrl.signal,
       cache: "no-store",
       headers: { accept: "application/json" },
     });
-    clearTimeout(timer);
     const json: unknown = await res.json().catch(() => null);
     return { ok: true, status: res.status, json };
   } catch {
     return { ok: false };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -98,6 +101,9 @@ function recover<T>(key: string, stub: () => T, empty: () => T): Envelope<T> {
   }
   if (liveIndexer) {
     return { data: empty(), usingStub: false, stale: true, source: "indexer" };
+  }
+  if (process.env.NODE_ENV === "production") {
+    return { data: empty(), usingStub: false, stale: true, source: "unavailable" };
   }
   return { data: stub(), usingStub: true, source: "stub" };
 }
@@ -207,7 +213,7 @@ export async function fetchPositions(query: PositionsQuery): Promise<Envelope<Po
     }
   }
   if (query.chainId !== undefined && chainHasLiveMarkets(query.chainId)) {
-    return rpcOk(empty());
+    return { data: empty(), usingStub: false, stale: true, source: "unavailable" };
   }
   return recover(key, () => stubPositions(query), empty);
 }
@@ -269,6 +275,8 @@ export async function fetchPortfolio(chainId: number, address: string): Promise<
 export async function fetchEvents(chainId?: number, address?: string): Promise<Envelope<EventsPageDto>> {
   const key = `events:${chainId ?? "all"}:${address ?? ""}`;
   const empty = (): EventsPageDto => ({ items: [], nextCursor: null });
+  const graph = await fetchGraphActivity(chainId, address);
+  if (graph) return { data: graph, usingStub: false, source: "graph" };
   const res = await getJson(`/v1/events${qs({ chainId, address })}`);
   if (!res.ok) return recover(key, () => stubEvents(chainId, address), empty);
   const parsed = EventsResponse.safeParse(res.json);

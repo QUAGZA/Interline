@@ -3,7 +3,7 @@ export const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL ?? "http://127.0.0.1:8545"
 
 export const lenderLabel = process.env.NEXT_PUBLIC_LENDER_LABEL ?? "lender.interline.eth";
 export const borrowerLabel = process.env.NEXT_PUBLIC_BORROWER_LABEL ?? "borrower.interline.eth";
-export const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
+export const walletConnectProjectId = (process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "").trim();
 
 function asAddress(value?: string): `0x${string}` | undefined {
   if (!value) return undefined;

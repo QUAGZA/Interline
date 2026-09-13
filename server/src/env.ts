@@ -11,6 +11,7 @@ export const ALLOWED_ENV = [
   "RPC_URL_11155111",
   "CHAIN_ID",
   "INDEXER_PORT",
+  "PORT",
   "INDEXER_POLL_MS",
   "INDEXER_MAX_BLOCK_RANGE",
   "INDEXER_REORG_DEPTH",
@@ -145,7 +146,7 @@ export function readIndexerEnv(env: NodeJS.ProcessEnv = process.env): IndexerEnv
 
   return {
     databaseUrl: env.DATABASE_URL ?? "postgres://interline:interline@127.0.0.1:5432/interline",
-    port: Number(env.INDEXER_PORT ?? "8787"),
+    port: Number(env.INDEXER_PORT ?? env.PORT ?? "8787"),
     pollMs: Number(env.INDEXER_POLL_MS ?? "2000"),
     maxBlockRange: Number(env.INDEXER_MAX_BLOCK_RANGE ?? "2000"),
     reorgDepth: Number(env.INDEXER_REORG_DEPTH ?? "64"),

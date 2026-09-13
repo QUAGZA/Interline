@@ -14,7 +14,13 @@ export function SourceBanner({
 }) {
   let label: string | null = null;
   let detail: string | null = null;
-  if (source === "rpc") {
+  if (source === "unavailable") {
+    label = "UNAVAILABLE";
+    detail = "The indexer is unavailable. This view cannot report complete loan or activity history.";
+  } else if (source === "rpc" && stale) {
+    label = "UNAVAILABLE";
+    detail = "On-chain reads failed. Balances could not be verified; retry shortly.";
+  } else if (source === "rpc") {
     label = "RPC";
     detail = "On-chain reads (indexer offline). Figures come from the catalog RPC, not typed fixtures.";
   } else if (usingStub || source === "stub") {
@@ -23,6 +29,9 @@ export function SourceBanner({
   } else if (stale) {
     label = "STALE";
     detail = "Indexer error — showing last-known live data. Figures may be stale.";
+  } else if (source === "graph") {
+    label = "GRAPH";
+    detail = "Activity from The Graph subgraph. Live balances still come from the catalog RPC or indexer.";
   } else if (source === "indexer") {
     label = "LIVE";
     detail = "Figures from the live indexer.";

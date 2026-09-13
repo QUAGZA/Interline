@@ -11,6 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 describe("env allowlist", () => {
+  it("uses the hosting platform port unless explicitly overridden", () => {
+    expect(readIndexerEnv({ PORT: "10000" }).port).toBe(10000);
+    expect(readIndexerEnv({ PORT: "10000", INDEXER_PORT: "8787" }).port).toBe(8787);
+  });
   it("rejects PRIVATE_KEY when present", () => {
     expect(() => assertNoSigningKeys({ PRIVATE_KEY: "0xabc" })).toThrow(EnvError);
   });

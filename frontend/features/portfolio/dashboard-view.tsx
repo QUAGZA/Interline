@@ -12,7 +12,8 @@ import { useWalletCatalogBalances } from "@/hooks/useWalletCatalogBalances";
 import { useCatalogChainId } from "@/lib/use-catalog-chain";
 import { V2_CHAINS, chainName, isV2ChainId } from "@/lib/chains";
 import { formatTokenAmount } from "@/lib/money";
-import { formatUnixDate, shortAddr } from "@/lib/format";
+import { formatUnixDate } from "@/lib/format";
+import { EnsLabel } from "@/components/ens-label";
 import { minDec } from "@/lib/money";
 import type { HealthCode } from "@/lib/api/types";
 import type { DirectFacilityDto } from "@/features/direct/dto";
@@ -303,7 +304,8 @@ function DirectList({
           {rows.map((row) => (
             <li key={`${row.chainId}-${row.facility}`} className="border border-border/50 bg-card p-4 space-y-2">
               <Link href={`/direct/${row.chainId}/${row.facility}`} className="font-mono text-sm hover:text-accent">
-                {you === "lender" ? "To" : "From"} {shortAddr(you === "lender" ? row.borrower : row.lender)}
+                {you === "lender" ? "To" : "From"}{" "}
+                <EnsLabel address={you === "lender" ? row.borrower : row.lender} />
               </Link>
               <p className="font-mono text-[28px] leading-none tabular-nums">
                 <TokenAmount raw={row.debtRaw} decimals={6} symbol="mUSDC" />

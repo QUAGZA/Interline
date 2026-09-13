@@ -8,7 +8,7 @@ import { usePositionsQuery, useDirectFacilitiesQuery } from "@/hooks/useV2Api";
 import { V2_CHAINS, parseRouteChainId } from "@/lib/chains";
 import { defaultV2ChainId, PAGE_SIZE } from "@/lib/config";
 import { useAppPrefs } from "@/features/settings/prefs";
-import { shortAddr } from "@/lib/format";
+import { EnsLabel } from "@/components/ens-label";
 import type { DeliveryMode } from "@/lib/api/types";
 
 export function PublicDesk() {
@@ -131,7 +131,7 @@ export function PublicDesk() {
                     href={`/positions/${p.chainId}/${p.marketId}/${p.owner}`}
                     className="font-mono text-xs hover:text-accent"
                   >
-                    {shortAddr(p.owner)}
+                    <EnsLabel address={p.owner} />
                   </Link>
                 </td>
                 <td className="px-3 py-3 font-mono text-xs">{p.marketLabel}</td>
@@ -150,7 +150,7 @@ export function PublicDesk() {
           </tbody>
         </table>
         {rows.length === 0 ? (
-          <p className="p-4 font-mono text-sm text-muted-foreground">No pool loans on this chain.</p>
+          <p className="p-4 font-mono text-sm text-muted-foreground">{q.data?.source === "unavailable" ? "Pool loan discovery is unavailable while the indexer is offline. Your own positions remain accessible from your dashboard." : "No pool loans on this chain."}</p>
         ) : null}
       </div>
 
@@ -162,7 +162,9 @@ export function PublicDesk() {
             className="block border border-border/50 bg-card p-4 space-y-2"
           >
             <div className="flex justify-between">
-              <span className="font-mono text-xs">{shortAddr(p.owner)}</span>
+              <span className="font-mono text-xs">
+                <EnsLabel address={p.owner} />
+              </span>
               <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                 {p.healthCode === "NO_DEBT" ? "No debt" : p.liquidatable ? "Liquidatable" : "Healthy"}
               </span>
@@ -223,10 +225,12 @@ function DirectAgreementsDesk({ chainId }: { chainId: number }) {
             <tr key={row.facility} className="border-b border-border/30">
               <td className="px-3 py-3 font-mono text-xs">
                 <Link href={`/direct/${row.chainId}/${row.facility}`} className="hover:text-accent">
-                  {shortAddr(row.lender)}
+                  <EnsLabel address={row.lender} />
                 </Link>
               </td>
-              <td className="px-3 py-3 font-mono text-xs">{shortAddr(row.borrower)}</td>
+              <td className="px-3 py-3 font-mono text-xs">
+                <EnsLabel address={row.borrower} />
+              </td>
               <td className="px-3 py-3">
                 <TokenAmount raw={row.creditLimitRaw} decimals={6} symbol="mUSDC" />
               </td>

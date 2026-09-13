@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { isAddress, parseEventLogs, type Address, type Hex } from "viem";
+import { parseEventLogs, type Address, type Hex } from "viem";
 import { useAccount, usePublicClient, useWalletClient } from "wagmi";
 import { PageHeader } from "@/components/ui/chrome";
 import { MoneyMovementPreview } from "./cards";
@@ -12,6 +12,9 @@ import { DIRECT_APR_RAY, directFactoryAbi } from "@/lib/direct-abi";
 import { directChainConfig } from "@/lib/catalog";
 import { useCatalogChainId } from "@/lib/use-catalog-chain";
 import { parseUsdc } from "@/lib/format";
+import { parsePartyInput, resolvedPartyAddress } from "@/lib/ens";
+import { useMainnetEnsAddress } from "@/hooks/useMainnetEns";
+import { EnsLabel } from "@/components/ens-label";
 import { toast } from "sonner";
 import { actionKey, latestForKey, newAttemptId, pendingForKey } from "@/lib/tx-attempt";
 import { errMsg } from "@/lib/errors";
@@ -35,9 +38,16 @@ export function CreationWizard({ initialIntent }: { initialIntent?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ facility: Hex; url: string } | null>(null);
 
-  const lender = (intent === "lend" ? address : (counterparty as Address | undefined)) as Address | undefined;
-  const borrower = (intent === "borrow" ? address : (counterparty as Address | undefined)) as Address | undefined;
-  const validParty = isAddress(counterparty) && address && counterparty.toLowerCase() !== address.toLowerCase();
+  const partyInput = parsePartyInput(counterparty);
+  const { data: ensAddr, isFetching: ensFetching } = useMainnetEnsAddress(
+    partyInput.kind === "ens" ? partyInput.name : null,
+  );
+  const resolvedParty = resolvedPartyAddress(partyInput, ensAddr);
+  const lender = (intent === "lend" ? address : resolvedParty) as Address | undefined;
+  const borrower = (intent === "borrow" ? address : resolvedParty) as Address | undefined;
+  const validParty = Boolean(
+    resolvedParty && address && resolvedParty.toLowerCase() !== address.toLowerCase(),
+  );
 
   const aprRay = useMemo(() => {
     const bps = BigInt(Math.round(Number(aprPct || "0") * 100));
@@ -228,15 +238,25 @@ export function CreationWizard({ initialIntent }: { initialIntent?: string }) {
 
       {step === 1 ? (
         <label className="block space-y-2 font-mono text-xs">
-          {intent === "lend" ? "Borrower's wallet address" : "Lender's wallet address"}
+          {intent === "lend" ? "Borrower's wallet or ENS name" : "Lender's wallet or ENS name"}
           <input
             value={counterparty}
             onChange={(e) => setCounterparty(e.target.value.trim())}
             className="w-full border border-border bg-background px-3 py-3 text-sm"
-            placeholder="0x…"
+            placeholder="0x… or name.eth"
           />
-          {counterparty && !validParty ? (
-            <p className="text-destructive">Enter a full checksum address that is not your own.</p>
+          {partyInput.kind === "ens" && ensFetching ? (
+            <p className="text-muted-foreground">Resolving {partyInput.name} on mainnet ENS…</p>
+          ) : null}
+          {resolvedParty ? (
+            <p className="text-muted-foreground">
+              Resolved <EnsLabel address={resolvedParty} />
+            </p>
+          ) : null}
+          {counterparty && !validParty && !ensFetching ? (
+            <p className="text-destructive">
+              Enter a wallet address or a mainnet .eth name that is not your own.
+            </p>
           ) : null}
         </label>
       ) : null}
@@ -285,8 +305,12 @@ export function CreationWizard({ initialIntent }: { initialIntent?: string }) {
 
       {step === 4 ? (
         <div className="space-y-4 font-mono text-xs">
-          <p>Lender {lender ? String(lender) : "—"}</p>
-          <p>Borrower {borrower ? String(borrower) : "—"}</p>
+          <p>
+            Lender <EnsLabel address={lender} />
+          </p>
+          <p>
+            Borrower <EnsLabel address={borrower} />
+          </p>
           <p>
             Limit {limit} mUSDC · APR {aprPct}%
           </p>
@@ -324,7 +348,7 @@ export function CreationWizard({ initialIntent }: { initialIntent?: string }) {
             type="button"
             className="border border-accent px-3 py-2"
             onClick={() => setStep(step + 1)}
-            disabled={(step === 1 && !validParty) || (step === 3 && !ackLtv)}
+            disabled={(step === 1 && (!validParty || ensFetching)) || (step === 3 && !ackLtv)}
           >
             Continue
           </button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { shortAddr } from "@/lib/format";
+import { EnsLabel } from "@/components/ens-label";
 
 export function CounterpartyCard({
   role,
@@ -19,7 +19,9 @@ export function CounterpartyCard({
         {role}
         {you ? " · You" : ""}
       </p>
-      <p className="font-mono text-[28px] leading-none tracking-tight">{shortAddr(address)}</p>
+      <p className="font-mono text-[28px] leading-none tracking-tight">
+        <EnsLabel address={address} />
+      </p>
       <div className="flex gap-3 font-mono text-[10px] uppercase tracking-widest">
         <button
           type="button"

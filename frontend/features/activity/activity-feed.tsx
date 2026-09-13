@@ -43,7 +43,7 @@ export function ActivityFeed() {
           </li>
         ))}
       </ul>
-      {items.length === 0 ? <p className="font-mono text-sm text-muted-foreground">No events yet.</p> : null}
+      {items.length === 0 ? <p className="font-mono text-sm text-muted-foreground">{events.data?.source === "unavailable" ? "Activity history is unavailable while the indexer is offline." : "No events yet."}</p> : null}
     </section>
   );
 }

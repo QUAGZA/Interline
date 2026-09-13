@@ -1,0 +1,15 @@
+type ProtocolEvent @entity(immutable: true) {
+  id: ID!
+  chainId: Int!
+  product: String!
+  name: String!
+  contract: Bytes!
+  marketOrFacility: Bytes
+  party: Bytes
+  counterparty: Bytes
+  detail: String!
+  txHash: Bytes!
+  logIndex: Int!
+  blockNumber: BigInt!
+  timestamp: BigInt!
+}

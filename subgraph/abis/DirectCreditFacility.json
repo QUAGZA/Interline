@@ -1,0 +1,46 @@
+[
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "address", "name": "party", "type": "address" },
+      { "indexed": true, "internalType": "bytes32", "name": "termsHash", "type": "bytes32" }
+    ],
+    "name": "TermsAccepted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "address", "name": "lender", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "assets", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "cashAfter", "type": "uint256" }
+    ],
+    "name": "Funded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "address", "name": "borrower", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "assets", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "shares", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "debtAfter", "type": "uint256" }
+    ],
+    "name": "Borrowed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "address", "name": "borrower", "type": "address" },
+      { "indexed": true, "internalType": "address", "name": "payer", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "assets", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "sharesBurned", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "principalPaid", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "interestPaid", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "roundingSurplus", "type": "uint256" }
+    ],
+    "name": "Repaid",
+    "type": "event"
+  }
+]

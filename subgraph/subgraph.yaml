@@ -1,0 +1,95 @@
+specVersion: 1.2.0
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: MarketFactory
+    network: sepolia
+    source:
+      address: "0x643ab12224e115147d158C93511E91c27e79AEE2"
+      abi: MarketFactory
+      startBlock: 11695332
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/factory.ts
+      entities:
+        - ProtocolEvent
+      abis:
+        - name: MarketFactory
+          file: ./abis/MarketFactory.json
+      eventHandlers:
+        - event: MarketCreated(indexed address,indexed address,indexed address,uint8)
+          handler: handleMarketCreated
+  - kind: ethereum
+    name: DirectFacilityFactory
+    network: sepolia
+    source:
+      address: "0x28910328557620935Aac0b76dDc1f2E18cdB2010"
+      abi: DirectFacilityFactory
+      startBlock: 11695332
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/factory.ts
+      entities:
+        - ProtocolEvent
+      abis:
+        - name: DirectFacilityFactory
+          file: ./abis/DirectFacilityFactory.json
+      eventHandlers:
+        - event: FacilityCreated(indexed address,indexed address,indexed address,address,bytes32,address)
+          handler: handleFacilityCreated
+templates:
+  - name: LendingMarket
+    kind: ethereum/contract
+    network: sepolia
+    source:
+      abi: LendingMarket
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/market.ts
+      entities:
+        - ProtocolEvent
+      abis:
+        - name: LendingMarket
+          file: ./abis/LendingMarket.json
+      eventHandlers:
+        - event: Supplied(indexed address,uint256,uint256,uint256,uint256)
+          handler: handleSupplied
+        - event: Withdrawn(indexed address,uint256,uint256,uint256)
+          handler: handleWithdrawn
+        - event: Borrowed(indexed address,uint256,uint256,address,uint256)
+          handler: handleBorrowed
+        - event: Repaid(indexed address,indexed address,uint256,uint256,uint256,uint256,uint256)
+          handler: handleRepaid
+        - event: Liquidated(indexed address,indexed address,uint256,uint256,uint256,bool)
+          handler: handleLiquidated
+  - name: DirectCreditFacility
+    kind: ethereum/contract
+    network: sepolia
+    source:
+      abi: DirectCreditFacility
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/direct.ts
+      entities:
+        - ProtocolEvent
+      abis:
+        - name: DirectCreditFacility
+          file: ./abis/DirectCreditFacility.json
+      eventHandlers:
+        - event: TermsAccepted(indexed address,indexed bytes32)
+          handler: handleTermsAccepted
+        - event: Funded(indexed address,uint256,uint256)
+          handler: handleFunded
+        - event: Borrowed(indexed address,uint256,uint256,uint256)
+          handler: handleBorrowed
+        - event: Repaid(indexed address,indexed address,uint256,uint256,uint256,uint256,uint256)
+          handler: handleRepaid

@@ -11,6 +11,7 @@ import { TokenAmount } from "@/features/risk/health-display";
 import { useDirectFacilitiesQuery } from "@/hooks/useV2Api";
 import { useCatalogChainId } from "@/lib/use-catalog-chain";
 import { rolesFor } from "./roles";
+import { EnsLabel } from "@/components/ens-label";
 import { shortAddr } from "@/lib/format";
 import type { DirectFacilityDto } from "./dto";
 
@@ -170,9 +171,9 @@ function FacilityTable({ rows, address }: { rows: DirectFacilityDto[]; address?:
             const roleLabel = r.isLender ? "Lending" : r.isBorrower ? "Borrowing" : "Observer";
             const waiting =
               r.isLender && row.lenderAccepted && !row.borrowerAccepted
-                ? `Waiting on ${shortAddr(row.borrower)}`
+                ? `Waiting on counterparty`
                 : r.isBorrower && row.borrowerAccepted && !row.lenderAccepted
-                  ? `Waiting on ${shortAddr(row.lender)}`
+                  ? `Waiting on counterparty`
                   : r.isCounterparty && ((r.isLender && !row.lenderAccepted) || (r.isBorrower && !row.borrowerAccepted))
                     ? "Needs your response"
                     : "View";
@@ -181,7 +182,8 @@ function FacilityTable({ rows, address }: { rows: DirectFacilityDto[]; address?:
                 <td className="p-3">{shortAddr(row.facility)}</td>
                 <td className="p-3">{roleLabel}</td>
                 <td className="p-3">
-                  {r.isLender ? "Borrower" : r.isBorrower ? "Lender" : "Parties"} {shortAddr(counterparty)}
+                  {r.isLender ? "Borrower" : r.isBorrower ? "Lender" : "Parties"}{" "}
+                  <EnsLabel address={counterparty} />
                 </td>
                 <td className="p-3">
                   <TokenAmount raw={row.creditLimitRaw} decimals={6} symbol="mUSDC" />

@@ -178,7 +178,7 @@ export type PositionsQuery = {
   limit?: number;
 };
 
-export type DataSource = "indexer" | "rpc" | "stub";
+export type DataSource = "indexer" | "rpc" | "stub" | "unavailable" | "graph";
 
 export type Envelope<T> = {
   data: T;

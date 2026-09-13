@@ -37,3 +37,4 @@ frontend/playwright-report/
 # Logs
 *.log
 npm-debug.log*
+.vercel

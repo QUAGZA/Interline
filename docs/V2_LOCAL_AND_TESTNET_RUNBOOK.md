@@ -137,6 +137,11 @@ Direct lending local flow: see `docs/V2_DIRECT_LENDING.md`. Playwright DL-01–1
 
 Playwright Anvil flows need Anvil + V2 deploy + frontend (and API if the desk is indexer-backed). See `frontend/tests/e2e`.
 
+Optional hosted extras (not required to use the app):
+
+- `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` for WalletConnect and Ledger Live. Leave unset for injected-only local/e2e. Ledger hardware through MetaMask still uses the injected connector. If you set a project id, also install `@walletconnect/ethereum-provider` in `frontend`.
+- `NEXT_PUBLIC_GRAPH_URL` after publishing `subgraph/` to The Graph Studio on Sepolia. Activity uses Graph first, then the indexer. Markets and positions stay on RPC.
+
 ## 7. Operator lab (not customer UI)
 
 v0 Ops extras (JUNK swap, Anvil warp, hash salt `0x01`) belong in developer tests / a local lab, not the customer desk.

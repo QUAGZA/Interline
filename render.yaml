@@ -1,0 +1,27 @@
+# Persistent indexer and API. Set DATABASE_URL to a Neon Postgres connection.
+# An always-on instance is required for continuous indexing; free services sleep.
+services:
+  - type: web
+    name: interline-indexer
+    runtime: node
+    plan: 0.5c-512mb
+    region: frankfurt
+    buildCommand: npm ci --include=dev
+    startCommand: npm run start -w interline-indexer
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: NODE_ENV
+        value: production
+      - key: CHAIN_ID
+        value: "11155111"
+      - key: RPC_URL_11155111
+        value: https://ethereum-sepolia-rpc.publicnode.com
+      - key: INDEXER_POLL_MS
+        value: "12000"
+      - key: INDEXER_MAX_BLOCK_RANGE
+        value: "1000"
+      - key: DATABASE_URL
+        sync: false

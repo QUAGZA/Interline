@@ -2,14 +2,22 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAccount, useConnect, useDisconnect, useEnsName, useSwitchChain } from "wagmi";
+import { useAccount, useConnect, useSwitchChain } from "wagmi";
 import { AnimatedNoise } from "@/components/animated-noise";
 import { BitmapChevron } from "@/components/bitmap-chevron";
+import { DisconnectButton } from "@/components/connect-button";
+import { EnsLabel } from "@/components/ens-label";
 import { useCatalogChainId } from "@/lib/use-catalog-chain";
 import { chainName } from "@/lib/chains";
-import { shortAddr } from "@/lib/format";
+import { walletConnectProjectId } from "@/lib/env";
 import { sanitizeReturnUrl } from "@/lib/return-url";
 import { cn } from "@/lib/utils";
+
+function connectorLabel(id: string, name: string): string {
+  if (id === "walletConnect") return "WalletConnect / Ledger Live";
+  if (id === "injected" && (name === "Injected" || name === "Browser Wallet")) return "Browser wallet";
+  return name;
+}
 
 export function ConnectGate() {
   const search = useSearchParams();
@@ -17,9 +25,7 @@ export function ConnectGate() {
   const returnTo = sanitizeReturnUrl(search.get("return") ?? undefined) ?? "/dashboard";
   const { address, isConnected, chain, chainId } = useAccount();
   const { connect, connectors, isPending, error } = useConnect();
-  const { disconnect } = useDisconnect();
   const { switchChain, isPending: switching } = useSwitchChain();
-  const { data: ens } = useEnsName({ address, query: { enabled: Boolean(address) } });
   const catalogChain = useCatalogChainId();
   const onPreferred = isConnected && chainId === catalogChain;
 
@@ -36,6 +42,10 @@ export function ConnectGate() {
           After connecting you return to{" "}
           <code className="text-accent">{returnTo}</code>. Any wallet can participate — there is no lender/borrower whitelist.
         </p>
+        <p className="mt-3 max-w-md font-mono text-xs text-muted-foreground leading-relaxed">
+          Browser wallets including MetaMask and Ledger-through-MetaMask.
+          {walletConnectProjectId ? " Ledger Live connects through WalletConnect." : null}
+        </p>
 
         {!isConnected ? (
           <div className="mt-12 space-y-3">
@@ -47,7 +57,7 @@ export function ConnectGate() {
                 onClick={() => connect({ connector: c })}
                 className="group flex w-full items-center justify-between border border-foreground/20 px-6 py-4 font-mono text-xs uppercase tracking-widest text-foreground hover:border-accent hover:text-accent disabled:opacity-50"
               >
-                <span>Connect {c.name}</span>
+                <span>Connect {connectorLabel(c.id, c.name)}</span>
                 <BitmapChevron className="transition-transform duration-[400ms] ease-in-out group-hover:rotate-45" />
               </button>
             ))}
@@ -59,7 +69,9 @@ export function ConnectGate() {
               <span className={cn("inline-block border px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest border-accent text-accent")}>
                 Connected
               </span>
-              <p className="font-mono text-sm text-foreground">{ens ?? shortAddr(address)}</p>
+              <p className="font-mono text-sm text-foreground">
+                <EnsLabel address={address} />
+              </p>
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                 {chain?.name ?? "unknown chain"}
               </p>
@@ -91,13 +103,7 @@ export function ConnectGate() {
               <BitmapChevron className="transition-transform duration-[400ms] ease-in-out group-hover:rotate-45" />
             </button>
 
-            <button
-              type="button"
-              onClick={() => disconnect()}
-              className="block font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
-            >
-              Disconnect
-            </button>
+            <DisconnectButton className="block border-0 px-0 hover:border-0" />
           </div>
         )}
 
