@@ -13,7 +13,6 @@ cache
 cache-*
 broadcast
 /lib/
-docs
 test
 tests
 coverage

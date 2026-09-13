@@ -161,10 +161,6 @@ The v0 UI reads the chain from the browser RPC. The indexer is optional.
 6. Optional: WalletConnect project id in `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`.
 7. Connect the two real wallets matching constructor lender/borrower.
 
-## Demo video
-
-Path: `docs/demo.mp4` (record the eight beats when you have two browser profiles).
-
 ## Addresses after deploy
 
 Deploy logs:
