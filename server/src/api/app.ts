@@ -5,7 +5,7 @@ import {
   EVENTS_MAX_LIMIT,
   POSITIONS_PAGE_SIZE,
 } from "@interline/api-types";
-import type { ChainConfig } from "../domain.js";
+import type { ChainConfig, CursorRecord } from "../domain.js";
 import { dec } from "../domain.js";
 import type { IndexerStore } from "../db/store.js";
 import { chainLag } from "../health/lag.js";
@@ -15,10 +15,11 @@ import {
   afterPositionCursor,
   cmpActiveLoan,
   decodeEventCursor,
+  decodeFacilityCursor,
   decodePositionCursor,
   encodeCursor,
 } from "./cursor.js";
-import { freshnessOf, projectionTimestamp, serializeMarket, serializePosition } from "./serialize.js";
+import { freshnessOf, projectionTimestamp, serializeDirectFacility, serializeMarket, serializePosition } from "./serialize.js";
 
 export type AppContext = {
   store: IndexerStore;
@@ -74,7 +75,7 @@ export function createApp(ctx: AppContext): Hono {
   app.get("/v1/markets", async (c) => {
     const chainQ = c.req.query("chainId");
     const chainId = chainQ ? parseChainId(chainQ) : undefined;
-    if (chainQ && chainId === null) return c.json({ error: "invalid chainId" }, 400);
+    if (chainId === null) return c.json({ error: "invalid chainId" }, 400);
     const markets = await ctx.store.listMarkets(chainId);
     const body = [];
     for (const market of markets) {
@@ -96,7 +97,7 @@ export function createApp(ctx: AppContext): Hono {
   app.get("/v1/positions", async (c) => {
     const chainQ = c.req.query("chainId");
     const chainId = chainQ ? parseChainId(chainQ) : undefined;
-    if (chainQ && chainId === null) return c.json({ error: "invalid chainId" }, 400);
+    if (chainId === null) return c.json({ error: "invalid chainId" }, 400);
     const marketId = c.req.query("marketId");
     const ownerQ = c.req.query("owner");
     const activeOnly = (c.req.query("active") ?? "true") !== "false";
@@ -159,6 +160,7 @@ export function createApp(ctx: AppContext): Hono {
     const ts = projectionTimestamp(cursor);
     const markets = await ctx.store.listMarkets(chainId);
     const positions = (await ctx.store.listPositions(chainId)).filter((p) => p.owner.toLowerCase() === address);
+    const directs = await ctx.store.listDirectFacilities(chainId);
     const supplies = [];
     const borrows = [];
     let lowest: bigint | null = null;
@@ -191,6 +193,19 @@ export function createApp(ctx: AppContext): Hono {
       supplies,
       borrows,
       lowestHealthFactorWad: lowest === null ? null : lowest.toString(10),
+      directLending: directs
+        .filter((d) => d.lender.toLowerCase() === address && d.lenderAccepted && d.borrowerAccepted && !d.ended)
+        .map((d) => serializeDirectFacility(d, cursor)),
+      directBorrowing: directs
+        .filter((d) => d.borrower.toLowerCase() === address && d.lenderAccepted && d.borrowerAccepted && !d.ended)
+        .map((d) => serializeDirectFacility(d, cursor)),
+      directRequests: directs
+        .filter((d) => {
+          const party = d.lender.toLowerCase() === address || d.borrower.toLowerCase() === address;
+          const pending = !(d.lenderAccepted && d.borrowerAccepted) && !d.declined && !d.cancelled && !d.ended;
+          return party && pending;
+        })
+        .map((d) => serializeDirectFacility(d, cursor)),
       freshness: freshnessOf(cursor, "UNAVAILABLE"),
     });
   });
@@ -198,7 +213,7 @@ export function createApp(ctx: AppContext): Hono {
   app.get("/v1/events", async (c) => {
     const chainQ = c.req.query("chainId");
     const chainId = chainQ ? parseChainId(chainQ) : undefined;
-    if (chainQ && chainId === null) return c.json({ error: "invalid chainId" }, 400);
+    if (chainId === null) return c.json({ error: "invalid chainId" }, 400);
     const limitRaw = Number(c.req.query("limit") ?? String(EVENTS_DEFAULT_LIMIT));
     const limit = Math.min(EVENTS_MAX_LIMIT, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : EVENTS_DEFAULT_LIMIT));
     const evCursor = decodeEventCursor(c.req.query("cursor"));
@@ -213,17 +228,25 @@ export function createApp(ctx: AppContext): Hono {
     });
     const page = rows.slice(0, limit);
     const markets = await ctx.store.listMarkets(chainId);
+    const directs = await ctx.store.listDirectFacilities(chainId);
     const events = page.map((e) => {
       const market = markets.find(
         (m) =>
           m.address.toLowerCase() === e.address.toLowerCase() ||
           e.args.market?.toLowerCase() === m.address.toLowerCase(),
       );
+      const direct = directs.find(
+        (f) =>
+          f.facility.toLowerCase() === e.address.toLowerCase() ||
+          f.vault.toLowerCase() === e.address.toLowerCase(),
+      );
+      const isDirect = Boolean(direct) || e.eventName === "FacilityCreated";
       return {
         chainId: e.chainId,
         marketId: market?.marketId ?? null,
         address: e.address,
         event: e.eventName,
+        product: market ? "POOL" : isDirect ? "DIRECT" : "POOL",
         blockNumber: e.blockNumber.toString(10),
         blockHash: e.blockHash,
         txHash: e.txHash,
@@ -238,6 +261,111 @@ export function createApp(ctx: AppContext): Hono {
         ? encodeCursor({ blockNumber: last.blockNumber.toString(10), logIndex: last.logIndex })
         : null;
     return c.json({ events, nextCursor });
+  });
+
+  app.get("/v1/direct-facilities", async (c) => {
+    const chainQ = c.req.query("chainId");
+    const chainId = chainQ ? parseChainId(chainQ) : undefined;
+    if (chainId === null) return c.json({ error: "invalid chainId" }, 400);
+    const party = (c.req.query("party") ?? "").toLowerCase();
+    const role = c.req.query("role") ?? "either";
+    const status = (c.req.query("status") ?? "all").toLowerCase();
+    const rows = await ctx.store.listDirectFacilities(chainId);
+    const cursor = chainId ? await ctx.store.getCursor(chainId) : null;
+    let items = rows.map((r) => serializeDirectFacility(r, cursor ?? (null as CursorRecord | null)));
+    if (party) {
+      items = items.filter((f) => {
+        const isL = f.lender.toLowerCase() === party;
+        const isB = f.borrower.toLowerCase() === party;
+        if (role === "lender") return isL;
+        if (role === "borrower") return isB;
+        return isL || isB;
+      });
+    }
+    if (status !== "all") {
+      items = items.filter((f) => {
+        if (status === "ended") return f.ended;
+        if (status === "declined") return f.declined;
+        if (status === "cancelled") return f.cancelled;
+        if (status === "pending") return !(f.lenderAccepted && f.borrowerAccepted) && !f.declined && !f.cancelled && !f.ended;
+        if (status === "active") return f.lenderAccepted && f.borrowerAccepted && !f.ended;
+        return true;
+      });
+    }
+    const limit = POSITIONS_PAGE_SIZE;
+    items.sort((a, b) =>
+      a.chainId !== b.chainId ? a.chainId - b.chainId : a.facility.localeCompare(b.facility),
+    );
+    const facCursor = decodeFacilityCursor(c.req.query("cursor"));
+    if (facCursor) {
+      items = items.filter((f) => {
+        if (f.chainId !== facCursor.chainId) return f.chainId > facCursor.chainId;
+        return f.facility.toLowerCase() > facCursor.facility.toLowerCase();
+      });
+    }
+    const page = items.slice(0, limit);
+    const last = page[page.length - 1];
+    return c.json({
+      facilities: page,
+      nextCursor:
+        items.length > limit && last
+          ? encodeCursor({ chainId: last.chainId, facility: last.facility })
+          : null,
+      limit,
+    });
+  });
+
+  app.get("/v1/direct-facilities/:chainId/:facility", async (c) => {
+    const chainId = parseChainId(c.req.param("chainId"));
+    if (chainId === null) return c.json({ error: "invalid chainId" }, 400);
+    const row = await ctx.store.getDirectFacility(chainId, c.req.param("facility"));
+    if (!row) return c.json({ error: "facility not found" }, 404);
+    const cursor = await ctx.store.getCursor(chainId);
+    return c.json({ facility: serializeDirectFacility(row, cursor) });
+  });
+
+  app.get("/v1/direct-facilities/:chainId/:facility/events", async (c) => {
+    const chainId = parseChainId(c.req.param("chainId"));
+    if (chainId === null) return c.json({ error: "invalid chainId" }, 400);
+    const facility = c.req.param("facility").toLowerCase();
+    const rows = await ctx.store.listEvents({ chainId, address: facility, limit: EVENTS_DEFAULT_LIMIT });
+    return c.json({
+      events: rows.map((e) => ({
+        chainId: e.chainId,
+        marketId: null,
+        address: e.address,
+        event: e.eventName,
+        blockNumber: e.blockNumber.toString(10),
+        blockHash: e.blockHash,
+        txHash: e.txHash,
+        logIndex: e.logIndex,
+        timestamp: e.timestamp.toString(10),
+        args: e.args,
+      })),
+      nextCursor: null,
+    });
+  });
+
+  app.get("/v1/direct-facilities/:chainId/:facility/history", async (c) => {
+    const chainId = parseChainId(c.req.param("chainId"));
+    if (chainId === null) return c.json({ error: "invalid chainId" }, 400);
+    const row = await ctx.store.getDirectFacility(chainId, c.req.param("facility"));
+    if (!row) return c.json({ error: "facility not found" }, 404);
+    const cursor = await ctx.store.getCursor(chainId);
+    const history = await ctx.store.listDirectHistory(chainId, row.facility);
+    return c.json({
+      facility: serializeDirectFacility(row, cursor),
+      history: history.map((h) => ({
+        cash: h.cash.toString(10),
+        debt: h.debt.toString(10),
+        principal: h.principal.toString(10),
+        creditLimit: h.creditLimit.toString(10),
+        blockNumber: h.blockNumber.toString(10),
+        timestamp: h.timestamp.toString(10),
+        txHash: h.txHash,
+        logIndex: h.logIndex,
+      })),
+    });
   });
 
   return app;

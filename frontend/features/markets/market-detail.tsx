@@ -11,6 +11,7 @@ import { formatApyFromGrowthRay, formatRayPercent, formatTokenAmount } from "@/l
 import { shortAddr } from "@/lib/format";
 import { chainName } from "@/lib/chains";
 import { useEffect, useState } from "react";
+import { liquidationCapacity } from "@/lib/forecast";
 
 export function MarketDetail({ chainId, marketId }: { chainId: number; marketId: string }) {
   const q = useMarketQuery(chainId, marketId);
@@ -43,9 +44,9 @@ export function MarketDetail({ chainId, marketId }: { chainId: number; marketId:
 
   const position = pos.data?.data;
   const liqCapacity = position?.collateralValueLoan.raw
-    ? (
-        (BigInt(position.collateralValueLoan.raw) * BigInt(market.liquidationThresholdBps)) /
-        10000n
+    ? liquidationCapacity(
+        BigInt(position.collateralValueLoan.raw),
+        BigInt(market.liquidationThresholdBps),
       ).toString()
     : "0";
 
@@ -57,7 +58,7 @@ export function MarketDetail({ chainId, marketId }: { chainId: number; marketId:
         description={`${market.loan.symbol} loan · ${market.collateral.symbol} collateral. Isolation: this pool cannot spend another market's cash.`}
         actions={<OracleBanner />}
       />
-      <SourceBanner usingStub={q.data?.usingStub} />
+      <SourceBanner usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />
       <div className="flex flex-wrap items-center gap-2">
         <StatusPill status={market.status} />
         <TestAssetBadge />
@@ -129,15 +130,24 @@ export function MarketDetail({ chainId, marketId }: { chainId: number; marketId:
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <MarketActions market={market} owner={address} />
+        <MarketActions
+          market={market}
+          owner={address}
+          debtRaw={position?.debt.raw}
+          maxWithdrawRaw={position?.maxWithdraw.raw}
+        />
         <div className="space-y-4">
           {position ? (
             <LiquidationScenarioCard
               healthCode={position.healthCode}
               liquidatable={position.liquidatable}
-              debtRaw={position.debt.raw}
+              oracleStatus={market.oracleStatus}
+              debtShares={position.debtShares}
+              epochIndexRay={market.epochIndexRay}
+              epochAprRay={market.borrowAprRay}
+              epochTimestamp={market.epochTimestamp}
+              recordedTimestamp={position.freshness.indexedBlockTimestamp}
               liquidationCapacityRaw={liqCapacity}
-              borrowAprRay={market.borrowAprRay}
             />
           ) : null}
           <RecallClock active={market.recallActive} deadlineUnix={market.recallDeadline} nowSec={now} />

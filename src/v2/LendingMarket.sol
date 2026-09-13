@@ -6,6 +6,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {ILendingMarket} from "./interfaces/ILendingMarket.sol";
+import {ICreditController} from "./interfaces/ICreditController.sol";
 import {IMarketOracle} from "./interfaces/IMarketOracle.sol";
 import {IBorrowerVaultFactory} from "./interfaces/IRestrictedVault.sol";
 import {IMarketRecoveryEscrow} from "./interfaces/IMarketRecoveryEscrow.sol";
@@ -17,7 +18,7 @@ import {SupplyShareSnapshots} from "./libraries/SupplyShareSnapshots.sol";
 
 /// @title LendingMarket
 /// @notice Isolated one-loan / one-collateral pool. Internal shares, not ERC-20 / ERC-4626.
-contract LendingMarket is ReentrancyGuard, ILendingMarket {
+contract LendingMarket is ReentrancyGuard, ILendingMarket, ICreditController {
     using SafeERC20 for IERC20;
     using SupplyShareSnapshots for SupplyShareSnapshots.Store;
 
@@ -52,8 +53,11 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
     error NotPending();
     error CapNotProposed();
     error CapNotApproved();
+    error CapBelowDebt();
     error Expired();
     error WalletMode();
+    error NotEscrow();
+    error ExcessRecovery();
 
     event Supplied(address indexed supplier, uint256 assets, uint256 shares, uint256 cashAfter, uint256 assetsAfter);
     event Withdrawn(address indexed supplier, uint256 assets, uint256 shares, uint256 cashAfter);
@@ -79,6 +83,7 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
         bool writtenOff
     );
     event WrittenOff(address indexed owner, uint256 snapshotId, uint256 debtWritten, uint256 principalArchived);
+    event RecoveryApplied(address indexed owner, uint256 assets, uint256 remaining);
     event Accrued(uint256 indexRay, uint256 aprRay, uint64 timestamp, uint256 utilizationRay);
     event RateEpoch(uint256 indexRay, uint256 aprRay, uint64 timestamp);
     event SupplyFreezeSet(bool frozen);
@@ -91,6 +96,7 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
     event GuardianAccepted(address indexed guardian);
     event CapProposed(bytes32 indexed digest, address indexed owner);
     event CapApproved(bytes32 indexed digest);
+    event CapCancelled(bytes32 indexed digest, address indexed owner);
     event PositionCapSet(address indexed owner, uint256 newCap);
 
     IERC20 public immutable loanToken;
@@ -132,6 +138,7 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
     mapping(address => uint256) public customPositionCap;
     mapping(address => bool) public defaulted;
     mapping(address => uint256) public writtenOffLiability;
+    mapping(address => uint256) public recoveredLiability;
     mapping(address => uint256) public writtenOffPrincipal;
 
     bool public supplyFrozen;
@@ -143,8 +150,11 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
     bytes32 public recallReasonHash;
 
     mapping(address => uint256) public capNonce;
-    mapping(bytes32 => bool) public capProposed;
-    mapping(bytes32 => bool) public capApproved;
+    mapping(address => bytes32) public pendingCapDigest;
+    mapping(address => uint256) public pendingCapExpiry;
+    mapping(address => uint256) public pendingCapNonce;
+    mapping(bytes32 => bool) public borrowerCapApproved;
+    mapping(bytes32 => bool) public curatorCapApproved;
 
     SupplyShareSnapshots.Store internal _snapshots;
 
@@ -240,6 +250,43 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
 
     function positionDebt(address owner) public view returns (uint256) {
         return ShareMath.debtFromShares(debtSharesOf[owner], indexNow());
+    }
+
+    function liveDebt(address owner) public view returns (uint256) {
+        return positionDebt(owner);
+    }
+
+    function collectRepayment(address owner, uint256 maxAssets) external nonReentrant {
+        _repay(owner, maxAssets, false);
+    }
+
+    function recoveryObligation(address owner) public view returns (uint256) {
+        uint256 written = writtenOffLiability[owner];
+        uint256 recovered = recoveredLiability[owner];
+        return written > recovered ? written - recovered : 0;
+    }
+
+    /// @notice Escrow-only settlement of recovered loan tokens against remaining write-off liability.
+    function applyRecovery(address owner, uint256 assets) external nonReentrant {
+        if (msg.sender != address(recoveryEscrow)) revert NotEscrow();
+        if (owner == address(0)) revert ZeroAddress();
+        if (assets == 0) revert ZeroAmount();
+        uint256 remaining = recoveryObligation(owner);
+        if (assets > remaining) revert ExcessRecovery();
+        recoveredLiability[owner] += assets;
+        emit RecoveryApplied(owner, assets, remaining - assets);
+    }
+
+    function recoverySink() public view returns (address) {
+        return address(recoveryEscrow);
+    }
+
+    function isDefaulted(address owner) public view returns (bool) {
+        return defaulted[owner];
+    }
+
+    function entryBlocked() public view returns (bool) {
+        return recallActive;
     }
 
     function positionCapOf(address owner) public view returns (uint256) {
@@ -459,30 +506,53 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
         return keccak256(abi.encodePacked("\x19\x01", _domainSeparator(), structHash));
     }
 
-    function proposeCap(address owner, uint256 newCap, uint256 nonce, uint256 expiry, bytes32 salt) external {
-        if (deliveryMode != DeliveryMode.Restricted) revert WalletMode();
-        if (msg.sender != owner && msg.sender != curator) revert NotCurator();
-        if (newCap == 0 || newCap > borrowCap) revert InvalidConfig();
+    /// @notice Commit-reveal: stores digest + public metadata only. Does not take or emit newCap/salt.
+    ///         One pending proposal per owner; a later propose at the current nonce replaces it.
+    function proposeCap(address owner, bytes32 digest, uint256 nonce, uint256 expiry) external {
+        _requireRestrictedCapParty(owner);
+        if (digest == bytes32(0)) revert InvalidConfig();
         if (expiry <= block.timestamp) revert Expired();
         if (nonce != capNonce[owner]) revert InvalidConfig();
-        bytes32 digest = hashCapProposal(owner, newCap, nonce, expiry, salt);
-        capProposed[digest] = true;
+        _clearPendingCap(owner);
+        pendingCapDigest[owner] = digest;
+        pendingCapExpiry[owner] = expiry;
+        pendingCapNonce[owner] = nonce;
         emit CapProposed(digest, owner);
     }
 
-    function approveCap(bytes32 digest) external onlyCurator {
-        if (!capProposed[digest]) revert CapNotProposed();
-        capApproved[digest] = true;
+    function approveCap(address owner, bytes32 digest) external {
+        _requireRestrictedCapParty(owner);
+        if (digest == bytes32(0) || digest != pendingCapDigest[owner]) revert CapNotProposed();
+        if (pendingCapNonce[owner] != capNonce[owner]) revert CapNotProposed();
+        if (pendingCapExpiry[owner] <= block.timestamp) revert Expired();
+        if (msg.sender == owner) borrowerCapApproved[digest] = true;
+        if (msg.sender == curator) curatorCapApproved[digest] = true;
         emit CapApproved(digest);
     }
 
+    /// @notice Either party invalidates the current nonce and clears the pending commitment.
+    function cancelCap(address owner, bytes32 digest) external {
+        _requireRestrictedCapParty(owner);
+        if (digest == bytes32(0) || digest != pendingCapDigest[owner]) revert CapNotProposed();
+        _clearPendingCap(owner);
+        unchecked {
+            capNonce[owner]++;
+        }
+        emit CapCancelled(digest, owner);
+    }
+
+    /// @notice Reveal terms. Requires current nonce, matching commitment, and both parties.
+    ///         Unilateral borrowing freezes use `setBorrowFrozen`, not a negotiated cap.
     function executeCap(address owner, uint256 newCap, uint256 nonce, uint256 expiry, bytes32 salt) external {
+        _requireRestrictedCapParty(owner);
         if (expiry <= block.timestamp) revert Expired();
+        if (nonce != capNonce[owner] || nonce != pendingCapNonce[owner]) revert CapNotProposed();
         bytes32 digest = hashCapProposal(owner, newCap, nonce, expiry, salt);
-        if (!capProposed[digest]) revert CapNotProposed();
-        if (!capApproved[digest]) revert CapNotApproved();
-        capProposed[digest] = false;
-        capApproved[digest] = false;
+        if (digest == bytes32(0) || digest != pendingCapDigest[owner]) revert CapNotProposed();
+        if (!borrowerCapApproved[digest] || !curatorCapApproved[digest]) revert CapNotApproved();
+        if (newCap == 0 || newCap > borrowCap) revert InvalidConfig();
+        if (newCap < positionDebt(owner)) revert CapBelowDebt();
+        _clearPendingCap(owner);
         unchecked {
             capNonce[owner]++;
         }
@@ -785,6 +855,23 @@ contract LendingMarket is ReentrancyGuard, ILendingMarket {
         uint256 before = token.balanceOf(to);
         token.safeTransfer(to, amount);
         if (token.balanceOf(to) - before != amount) revert FeeOnTransfer();
+    }
+
+    function _requireRestrictedCapParty(address owner) internal view {
+        if (deliveryMode != DeliveryMode.Restricted) revert WalletMode();
+        if (owner == address(0)) revert ZeroAddress();
+        if (msg.sender != owner && msg.sender != curator) revert NotCurator();
+    }
+
+    function _clearPendingCap(address owner) internal {
+        bytes32 digest = pendingCapDigest[owner];
+        if (digest != bytes32(0)) {
+            borrowerCapApproved[digest] = false;
+            curatorCapApproved[digest] = false;
+        }
+        pendingCapDigest[owner] = bytes32(0);
+        pendingCapExpiry[owner] = 0;
+        pendingCapNonce[owner] = 0;
     }
 
     function _domainSeparator() internal view returns (bytes32) {

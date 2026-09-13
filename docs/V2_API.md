@@ -20,7 +20,7 @@ Lag is a **degraded** signal, not silent zero balances.
 
 | Method | Path | Body |
 |---|---|---|
-| GET | `/v1/chains` | `{ chains[] }` — 31337, 84532 |
+| GET | `/v1/chains` | `{ chains[] }` — 31337, 84532, 11155111 |
 | GET | `/v1/markets` | `{ markets: MarketSummary[] }` optional `chainId` |
 | GET | `/v1/markets/:chainId/:marketId` | `{ market }` |
 

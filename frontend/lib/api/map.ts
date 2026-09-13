@@ -8,7 +8,7 @@ import type {
   Position,
   SupplyHolding,
 } from "@interline/api-types";
-import { catalogById, isWritableMarket } from "@/lib/catalog";
+import { catalogById, isWritableMarket, withCatalogTokens } from "@/lib/catalog";
 import type {
   AmountDto,
   ApiHealthDto,
@@ -50,6 +50,7 @@ function freshnessUi(f: Freshness) {
     blockNumber: f.indexedBlockNumber,
     blockHash: f.indexedBlockHash ? asAddr(f.indexedBlockHash) : null,
     indexedAt: f.indexedAt,
+    indexedBlockTimestamp: f.indexedBlockTimestamp,
     lagSeconds: Number(BigInt(f.lagBlocks) > 1_000_000n ? 0n : BigInt(f.lagBlocks)),
   };
 }
@@ -62,7 +63,7 @@ export function mapMarketSummary(row: MarketSummary): MarketSummaryDto {
   const loan = token(row.loanToken);
   const collateral = token(row.collateralToken);
   const listed = catalogById(row.chainId, row.marketId) ?? catalogById(row.chainId, row.address);
-  return {
+  return withCatalogTokens({
     chainId: row.chainId,
     marketId: row.marketId,
     address: asAddr(row.address),
@@ -76,12 +77,14 @@ export function mapMarketSummary(row: MarketSummary): MarketSummaryDto {
     borrowed: amt(row.totalDebt, loan.decimals, loan.symbol),
     liquidity: amt(row.accountedCash, loan.decimals, loan.symbol),
     utilizationRay: row.utilizationRay,
+    epochIndexRay: row.epochIndexRay,
+    epochTimestamp: row.epochTimestamp,
     status: row.status,
     oracleMode: row.oracleMode,
     oracleStatus: mapOracle(row.oracleStatus),
     writable: isWritableMarket(row.chainId, row.address) || isWritableMarket(row.chainId, row.marketId),
     freshness: freshnessUi(row.freshness),
-  };
+  });
 }
 
 export function mapMarketDetail(row: MarketSummary): MarketDetailDto {
@@ -123,6 +126,7 @@ export function mapPosition(row: Position, market?: MarketSummary | MarketDetail
     marketLabel: listed?.label ?? row.marketId,
     deliveryMode: row.deliveryMode,
     debt: amt(row.projectedDebt, loanDecimals, loanSymbol),
+    debtShares: row.debtShares,
     principal: amt(row.principalOutstanding, loanDecimals, loanSymbol),
     collateral: amt(row.collateral, collDecimals, collSymbol),
     collateralValueLoan: amt(row.collateralValueLoan ?? "0", loanDecimals, loanSymbol),
@@ -157,6 +161,7 @@ export function emptyPosition(chainId: number, marketId: string, owner: string, 
     marketLabel: listed?.label ?? market?.label ?? marketId,
     deliveryMode: listed?.deliveryMode ?? market?.deliveryMode ?? "wallet",
     debt: amt("0", loanDecimals, loanSymbol),
+    debtShares: "0",
     principal: amt("0", loanDecimals, loanSymbol),
     collateral: amt("0", collDecimals, collSymbol),
     collateralValueLoan: amt("0", loanDecimals, loanSymbol),
@@ -176,6 +181,7 @@ export function emptyPosition(chainId: number, marketId: string, owner: string, 
       blockNumber: "0",
       blockHash: null,
       indexedAt: new Date(0).toISOString(),
+      indexedBlockTimestamp: "0",
       lagSeconds: 0,
     },
   };
@@ -218,6 +224,9 @@ export function mapPortfolio(row: PortfolioResponse): PortfolioDto {
     lowestHealthFactorWad: row.lowestHealthFactorWad,
     lowestHealthCode,
     freshness: freshnessUi(row.freshness),
+    directLending: (row.directLending ?? []) as PortfolioDto["directLending"],
+    directBorrowing: (row.directBorrowing ?? []) as PortfolioDto["directBorrowing"],
+    directRequests: (row.directRequests ?? []) as PortfolioDto["directRequests"],
   };
 }
 
@@ -232,7 +241,10 @@ export function mapEvent(row: IndexedEvent): EventDto {
     logIndex: row.logIndex,
     blockNumber: row.blockNumber,
     name: row.event,
-    detail: detail || row.event,
+    product: row.product,
+    detail: [row.product === "DIRECT" ? "Direct" : row.marketId ? "Pool" : null, detail || row.event]
+      .filter(Boolean)
+      .join(" · "),
     at: row.timestamp,
   };
 }

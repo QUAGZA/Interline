@@ -6,7 +6,7 @@ import {
   faucetAbi,
   loadManifest,
   marketAbi,
-  rpcReady,
+  resolveAnvilRpc,
   send,
   vaultFactoryAbi,
 } from "./helpers/anvil";
@@ -14,8 +14,8 @@ import {
 test.describe("Anvil protocol flows", () => {
   test("supply, collateral, borrow wallet+restricted, repay, withdraw limit, liquidate", async () => {
     test.setTimeout(180_000);
-    const ready = await rpcReady();
-    test.skip(!ready, "Anvil RPC not reachable on 127.0.0.1:8545");
+    const rpcUrl = await resolveAnvilRpc();
+    test.skip(!rpcUrl, "Anvil RPC not reachable, or factory in deployments/31337/v2.json has no code");
     const manifest = loadManifest();
     test.skip(!manifest, "deployments/31337/v2.json missing — run DeployV2Local.s.sol");
 
@@ -23,7 +23,7 @@ test.describe("Anvil protocol flows", () => {
     const restrictedMarket = manifest!.markets.find((m) => m.deliveryMode === "restricted");
     expect(walletMarket && restrictedMarket).toBeTruthy();
 
-    const fresh = clientsFor(7);
+    const fresh = clientsFor(7, rpcUrl);
     const { publicClient, walletClient, account } = fresh;
 
     await send(walletClient, publicClient, {
@@ -185,7 +185,7 @@ test.describe("Anvil protocol flows", () => {
       });
     }
 
-    const victim = clientsFor(8);
+    const victim = clientsFor(8, rpcUrl);
     await send(victim.walletClient, victim.publicClient, {
       account: victim.account,
       to: manifest!.faucet,

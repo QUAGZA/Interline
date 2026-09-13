@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { OracleBanner, PageHeader, SourceBanner, StatusPill, TestAssetBadge } from "@/components/ui/chrome";
 import { useMarketsQuery } from "@/hooks/useV2Api";
-import { parseRouteChainId } from "@/lib/chains";
+import { V2_CHAINS, parseRouteChainId } from "@/lib/chains";
 import { defaultV2ChainId } from "@/lib/config";
 import { useAppPrefs } from "@/features/settings/prefs";
 import { formatApyFromGrowthRay, formatRayPercent, formatTokenAmount } from "@/lib/money";
@@ -40,12 +40,15 @@ export function MarketsTable() {
             value={chainId}
             onChange={(e) => router.push(`/markets?chainId=${e.target.value}`)}
           >
-            <option value="31337">Anvil</option>
-            <option value="84532">Base Sepolia</option>
+            {V2_CHAINS.map((c) => (
+              <option key={c.chainId} value={c.chainId}>
+                {c.name}
+              </option>
+            ))}
           </select>
         </label>
       </div>
-      <SourceBanner usingStub={usingStub} />
+      <SourceBanner usingStub={usingStub} stale={q.data?.stale} source={q.data?.source} />
       {q.isError ? (
         <p className="mt-4 font-mono text-sm text-destructive">Market list unavailable.</p>
       ) : null}

@@ -87,7 +87,7 @@ export function HeroSection() {
 
       <div className="absolute bottom-8 right-8 md:bottom-12 md:right-12">
         <div className="border border-border px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          v2 / Anvil + Base Sepolia
+          v2 / Anvil + Base Sepolia + Ethereum Sepolia
         </div>
       </div>
     </section>

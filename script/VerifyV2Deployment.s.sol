@@ -6,9 +6,10 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {LendingMarket} from "../src/v2/LendingMarket.sol";
 import {MarketFactory} from "../src/v2/MarketFactory.sol";
 import {ILendingMarket} from "../src/v2/interfaces/ILendingMarket.sol";
+import {DirectFacilityFactory} from "../src/v2/direct/DirectFacilityFactory.sol";
 
-/// @notice Checks deployments/{chainId}/v2.json against live contracts. Anvil 31337 and Base Sepolia 84532 only.
-/// @dev forge script script/VerifyV2Deployment.s.sol:VerifyV2Deployment --rpc-url http://127.0.0.1:8545 --via-ir
+/// @notice Checks deployments/{chainId}/v2.json against live contracts (Anvil, Base Sepolia, Ethereum Sepolia).
+/// @dev forge script script/VerifyV2Deployment.s.sol:VerifyV2Deployment --rpc-url $RPC_URL --via-ir
 contract VerifyV2Deployment is Script {
     using stdJson for string;
 
@@ -18,7 +19,7 @@ contract VerifyV2Deployment is Script {
 
     function run() external view {
         uint256 chainId = block.chainid;
-        require(chainId == 31337 || chainId == 84532, "unsupported chain");
+        require(chainId == 31337 || chainId == 84532 || chainId == 11155111, "unsupported chain");
 
         string memory path = string.concat("deployments/", vm.toString(chainId), "/v2.json");
         string memory json = vm.readFile(path);
@@ -45,8 +46,8 @@ contract VerifyV2Deployment is Script {
         require(LendingMarket(wallet).deliveryMode() == ILendingMarket.DeliveryMode.Wallet, "wallet mode");
         require(LendingMarket(restricted).deliveryMode() == ILendingMarket.DeliveryMode.Restricted, "restricted mode");
 
-        require(LendingMarket(wallet).maxLtvBps() == 7000, "ltv");
-        require(LendingMarket(wallet).liquidationThresholdBps() == 8000, "lt");
+        require(LendingMarket(wallet).maxLtvBps() == 8000, "ltv");
+        require(LendingMarket(wallet).liquidationThresholdBps() == 9000, "lt");
         require(LendingMarket(wallet).liquidationBonusBps() == 500, "bonus");
         require(LendingMarket(wallet).supplyCap() == SUPPLY_CAP, "supply cap");
         require(LendingMarket(wallet).borrowCap() == BORROW_CAP, "borrow cap");
@@ -64,6 +65,20 @@ contract VerifyV2Deployment is Script {
 
         require(address(LendingMarket(wallet).loanToken()) == json.readAddress(".loanToken"), "loan token");
         require(address(LendingMarket(wallet).collateralToken()) == json.readAddress(".collateralToken"), "collat token");
+
+        if (vm.keyExistsJson(json, ".directFactory")) {
+            address directFactory = json.readAddress(".directFactory");
+            if (directFactory != address(0)) {
+                require(directFactory.code.length > 0, "direct factory code");
+                require(DirectFacilityFactory(directFactory).loanToken() == json.readAddress(".loanToken"), "direct loan");
+                require(DirectFacilityFactory(directFactory).oracle() == address(LendingMarket(wallet).oracle()), "direct oracle");
+                require(DirectFacilityFactory(directFactory).vaultFactory() == json.readAddress(".vaultFactory"), "direct vault factory");
+            }
+        }
+        if (vm.keyExistsJson(json, ".directLens")) {
+            address directLens = json.readAddress(".directLens");
+            if (directLens != address(0)) require(directLens.code.length > 0, "direct lens code");
+        }
 
         console.log("verified factory", factory);
         console.log("wallet", wallet);

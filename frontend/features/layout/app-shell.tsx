@@ -13,7 +13,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Suspense fallback={<HeaderFallback />}>
         <AppHeader />
       </Suspense>
-      <div className="grid-bg fixed inset-0 opacity-20" aria-hidden="true" />
+      <div className="grid-bg pointer-events-none fixed inset-0 -z-10 opacity-20" aria-hidden="true" />
       <div className="relative z-10">{children}</div>
     </div>
   );

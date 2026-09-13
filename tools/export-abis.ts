@@ -29,6 +29,9 @@ const CONTRACTS = [
   "MockSequencerFeed",
   "MockERC4626Venue",
   "MockSwapRouter",
+  "DirectCreditFacility",
+  "DirectFacilityFactory",
+  "DirectFacilityLens",
 ] as const;
 
 type Artifact = { abi: unknown[]; bytecode?: { object?: string } };

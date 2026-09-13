@@ -1,4 +1,4 @@
-import { catalogById } from "@/lib/catalog";
+import { catalogById, withCatalogTokens } from "@/lib/catalog";
 import { PAGE_SIZE } from "@/lib/config";
 import { V2_CHAINS, type V2ChainId } from "@/lib/chains";
 import type {
@@ -30,10 +30,13 @@ const MWETH: TokenRef = {
   testAsset: true,
 };
 
+const RAY = "1" + "0".repeat(27);
+
 const FRESH = {
   blockNumber: "1",
   blockHash: "0x0000000000000000000000000000000000000000000000000000000000000001" as `0x${string}`,
   indexedAt: "2026-09-13T00:00:00.000Z",
+  indexedBlockTimestamp: "0",
   lagSeconds: 0,
 };
 
@@ -78,6 +81,22 @@ const MARKETS: MarketDetailDto[] = [
     borrowAprRay: "42222222222222222222222222",
     supplyApyGrowthRay: "1009380000000000000000000000",
   }),
+  detail(11155111, "usdc-weth-wallet", hexAddr(0xe11e01), "mUSDC / mWETH - Wallet", "wallet", {
+    supplied: "40000000000",
+    borrowed: "8000000000",
+    liquidity: "32000000000",
+    utilRay: "200000000000000000000000000",
+    borrowAprRay: "40000000000000000000000000",
+    supplyApyGrowthRay: "1008000000000000000000000000",
+  }),
+  detail(11155111, "usdc-weth-restricted", hexAddr(0xe11e02), "mUSDC / mWETH - Restricted", "restricted", {
+    supplied: "15000000000",
+    borrowed: "3000000000",
+    liquidity: "12000000000",
+    utilRay: "200000000000000000000000000",
+    borrowAprRay: "40000000000000000000000000",
+    supplyApyGrowthRay: "1008000000000000000000000000",
+  }),
 ];
 
 function detail(
@@ -109,13 +128,15 @@ function detail(
     borrowed: amt(rates.borrowed, 6, "mUSDC"),
     liquidity: amt(rates.liquidity, 6, "mUSDC"),
     utilizationRay: rates.utilRay,
+    epochIndexRay: RAY,
+    epochTimestamp: "0",
     status: "active",
     oracleMode: "simulated",
     oracleStatus: "ok",
     writable: false,
     freshness: FRESH,
-    maxLtvBps: 7000,
-    liquidationThresholdBps: 8000,
+    maxLtvBps: 8000,
+    liquidationThresholdBps: 9000,
     liquidationBonusBps: 500,
     supplyCap: amt("1000000000000", 6, "mUSDC"),
     borrowCap: amt("800000000000", 6, "mUSDC"),
@@ -148,6 +169,7 @@ function makePosition(
     marketLabel: market.label,
     deliveryMode: market.deliveryMode,
     debt: amt(debtRaw, 6, "mUSDC"),
+    debtShares: debtRaw === "0" ? "0" : (BigInt(debtRaw) * 10n ** 27n).toString(),
     principal: amt(debtRaw, 6, "mUSDC"),
     collateral: amt(collateralWei, 18, "mWETH"),
     collateralValueLoan: amt("2000000000", 6, "mUSDC"),
@@ -240,7 +262,13 @@ export function stubMarkets(chainId?: number): MarketSummaryDto[] {
   return rows.map((m) => {
     const listed = catalogById(m.chainId, m.marketId);
     if (!listed) return m;
-    return { ...m, marketId: listed.id, address: listed.address, label: listed.label, writable: listed.writable };
+    return withCatalogTokens({
+      ...m,
+      marketId: listed.id,
+      address: listed.address,
+      label: listed.label,
+      writable: listed.writable,
+    });
   });
 }
 
@@ -254,7 +282,13 @@ export function stubMarket(chainId: number, marketId: string): MarketDetailDto |
     ) ?? (listed ? MARKETS.find((m) => m.chainId === chainId && m.marketId === listed.id) : undefined);
   if (!found) return null;
   if (!listed) return found;
-  return { ...found, marketId: listed.id, address: listed.address, label: listed.label, writable: listed.writable };
+  return withCatalogTokens({
+    ...found,
+    marketId: listed.id,
+    address: listed.address,
+    label: listed.label,
+    writable: listed.writable,
+  });
 }
 
 export function stubPositions(q: PositionsQuery): PositionsPageDto {

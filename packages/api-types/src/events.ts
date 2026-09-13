@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { ChainId, DecimalString, HexAddress, TxHash } from "./primitives.js";
+import { ChainId, DecimalString, HexAddress, TxHash } from "./primitives";
 
 export const IndexedEvent = z.object({
   chainId: ChainId,
   marketId: z.string().nullable(),
   address: HexAddress,
   event: z.string(),
+  product: z.enum(["POOL", "DIRECT"]).optional(),
   blockNumber: DecimalString,
   blockHash: TxHash.nullable(),
   txHash: TxHash,

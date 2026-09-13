@@ -10,7 +10,24 @@ export type TxKind =
   | "removeCollateral"
   | "borrow"
   | "repay"
-  | "liquidate";
+  | "liquidate"
+  | "directCreate"
+  | "directAccept"
+  | "directDecline"
+  | "directCancel"
+  | "directFund"
+  | "directWithdrawCash"
+  | "directBorrow"
+  | "directRepay"
+  | "directRecall"
+  | "directCap"
+  | "directPause"
+  | "directEnd"
+  | "directVenue"
+  | "directAddCollateral"
+  | "directRemoveCollateral"
+  | "faucet"
+  | "oracleRefresh";
 
 export type TxPhase =
   | "idle"
@@ -43,18 +60,45 @@ type Action =
   | { type: "upsert"; record: TxRecord }
   | { type: "patch"; id: string; patch: Partial<TxRecord> };
 
+const TX_STORAGE_KEY = "interline.tx-records.v1";
+
+function loadState(): State {
+  if (typeof sessionStorage === "undefined") return { byId: {} };
+  try {
+    const raw = sessionStorage.getItem(TX_STORAGE_KEY);
+    if (!raw) return { byId: {} };
+    const parsed = JSON.parse(raw) as State;
+    if (!parsed?.byId || typeof parsed.byId !== "object") return { byId: {} };
+    return parsed;
+  } catch {
+    return { byId: {} };
+  }
+}
+
+function persist(state: State) {
+  try {
+    sessionStorage.setItem(TX_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 function reducer(state: State, action: Action): State {
   if (action.type === "upsert") {
-    return { byId: { ...state.byId, [action.record.id]: action.record } };
+    const next = { byId: { ...state.byId, [action.record.id]: action.record } };
+    persist(next);
+    return next;
   }
   const current = state.byId[action.id];
   if (!current) return state;
-  return {
+  const next = {
     byId: {
       ...state.byId,
       [action.id]: { ...current, ...action.patch, updatedAt: Date.now() },
     },
   };
+  persist(next);
+  return next;
 }
 
 type TxContextValue = {
@@ -67,7 +111,7 @@ type TxContextValue = {
 const TxContext = createContext<TxContextValue | null>(null);
 
 export function TxProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { byId: {} });
+  const [state, dispatch] = useReducer(reducer, undefined, loadState);
   const upsert = useCallback((record: TxRecord) => dispatch({ type: "upsert", record }), []);
   const patch = useCallback((id: string, next: Partial<TxRecord>) => dispatch({ type: "patch", id, patch: next }), []);
   const get = useCallback((id: string) => state.byId[id], [state.byId]);

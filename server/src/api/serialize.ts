@@ -1,9 +1,10 @@
 import {
+  type DirectFacility,
   type Freshness,
   type MarketSummary,
   type Position,
 } from "@interline/api-types";
-import type { CursorRecord, MarketRecord, PositionRecord } from "../domain.js";
+import type { CursorRecord, DirectFacilityRecord, MarketRecord, PositionRecord } from "../domain.js";
 import { dec } from "../domain.js";
 import { marketStatus, projectMarket, projectPosition } from "../indexer/project.js";
 
@@ -11,15 +12,26 @@ export function freshnessOf(cursor: CursorRecord | null, oracleStatus: MarketRec
   const indexed = cursor?.lastBlock ?? 0n;
   const head = cursor?.headBlock ?? indexed;
   const lag = head > indexed ? head - indexed : 0n;
+  const hydrated = cursor?.hydratedBlockNumber ?? null;
+  const hydrationOk = cursor?.hydrationOk === true && cursor.lastError === null;
+  const publishedOracle = hydrationOk ? oracleStatus : oracleStatus === "OK" ? "UNAVAILABLE" : oracleStatus;
+  const lastPolledAt = cursor?.lastPolledAt ?? cursor?.updatedAt ?? new Date(0).toISOString();
   return {
     indexedBlockNumber: dec(indexed < 0n ? 0n : indexed),
     indexedBlockHash: cursor?.lastHash ?? null,
     indexedBlockTimestamp: dec(cursor?.lastTimestamp ?? 0n),
     headBlockNumber: dec(head < 0n ? 0n : head),
     lagBlocks: dec(lag),
-    indexedAt: cursor?.updatedAt ?? new Date(0).toISOString(),
-    oracleStatus,
+    indexedAt: cursor?.lastHydratedAt ?? lastPolledAt,
+    oracleStatus: publishedOracle,
     oracleMode: "simulated",
+    hydratedBlockNumber: dec(hydrated !== null && hydrated >= 0n ? hydrated : 0n),
+    hydratedBlockHash: cursor?.hydratedBlockHash ?? null,
+    hydratedBlockTimestamp: dec(cursor?.hydratedBlockTimestamp ?? 0n),
+    lastHydratedAt: cursor?.lastHydratedAt ?? null,
+    lastPolledAt,
+    lastError: cursor?.lastError ?? null,
+    hydrationOk,
   };
 }
 
@@ -102,7 +114,50 @@ export function serializePosition(
   };
 }
 
+export function serializeDirectFacility(
+  row: DirectFacilityRecord,
+  cursor: CursorRecord | null,
+): DirectFacility {
+  const hash = row.termsHash.length >= 66 ? row.termsHash : (`0x${row.termsHash.slice(2).padEnd(64, "0")}` as const);
+  const principal = row.principal;
+  const debt = row.lastDebt > 0n ? row.lastDebt : row.principal;
+  const interest = debt > principal ? debt - principal : 0n;
+  return {
+    product: "DIRECT",
+    protocolVersion: "interline-direct-v2",
+    chainId: row.chainId,
+    facility: row.facility,
+    lender: row.lender,
+    borrower: row.borrower,
+    vault: row.vault,
+    asset: { address: row.asset, symbol: "mUSDC", decimals: 6 },
+    termsHash: hash,
+    lenderAccepted: row.lenderAccepted,
+    borrowerAccepted: row.borrowerAccepted,
+    declined: row.declined,
+    cancelled: row.cancelled,
+    ended: row.ended,
+    acceptanceDeadline: dec(row.acceptanceDeadline),
+    activatedAt: row.activatedAt === 0n ? null : dec(row.activatedAt),
+    borrowExpiry: row.borrowExpiry === 0n ? null : dec(row.borrowExpiry),
+    repaymentDueAt: row.repaymentDueAt === 0n ? null : dec(row.repaymentDueAt),
+    creditLimitRaw: dec(row.creditLimit),
+    availableCashRaw: dec(row.accountedCash),
+    principalRaw: dec(principal),
+    debtRaw: dec(debt),
+    accruedInterestRaw: dec(interest),
+    fixedAprRay: dec(row.aprRay),
+    recallDeadline: row.recallDeadline === 0n ? null : dec(row.recallDeadline),
+    borrowingPaused: row.borrowingPaused,
+    collateralization: "OVERCOLLATERALIZED_80",
+    healthFactorWad: null,
+    priceLiquidatable: false,
+    freshness: freshnessOf(cursor, "UNAVAILABLE"),
+  };
+}
+
 export function projectionTimestamp(cursor: CursorRecord | null): bigint {
+  if (cursor && cursor.hydratedBlockTimestamp > 0n) return cursor.hydratedBlockTimestamp;
   if (cursor && cursor.lastTimestamp > 0n) return cursor.lastTimestamp;
   return BigInt(Math.floor(Date.now() / 1000));
 }

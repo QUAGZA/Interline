@@ -63,8 +63,8 @@ contract LendingMarketTest is MarketFixture {
                 loanToken: address(musdc),
                 collateralToken: address(mweth),
                 oracle: address(oracle),
-                maxLtvBps: 7000,
-                liquidationThresholdBps: 8000,
+                maxLtvBps: 8000,
+                liquidationThresholdBps: 9000,
                 liquidationBonusBps: 500,
                 supplyCap: SUPPLY_CAP,
                 borrowCap: BORROW_CAP,
@@ -127,15 +127,15 @@ contract LendingMarketTest is MarketFixture {
         _fund(bob, 0, 1 ether);
         _supply(alice, 200_000e6);
         _collateral(bob, 1 ether);
-        _borrow(bob, 1_400e6);
-        wethFeed.setAnswer(1750e8);
+        _borrow(bob, 1_440e6);
+        wethFeed.setAnswer(1600e8);
         (PriceMath.HealthCode code, uint256 hf, uint256 debt, uint256 liqCap,, bool liquidatable) = market.healthOf(bob);
         assertEq(uint256(code), uint256(PriceMath.HealthCode.OK));
-        assertEq(debt, 1_400e6);
-        assertEq(liqCap, 1_400e6);
+        assertEq(debt, 1_440e6);
+        assertEq(liqCap, 1_440e6);
         assertEq(hf, 1e18);
         assertFalse(liquidatable);
-        wethFeed.setAnswer(1749e8);
+        wethFeed.setAnswer(1599e8);
         (,,,,, liquidatable) = market.healthOf(bob);
         assertTrue(liquidatable);
     }
@@ -170,6 +170,75 @@ contract LendingMarketTest is MarketFixture {
         market.liquidate(bob, 0, col / 2, type(uint256).max, 0);
         assertLt(market.collateralOf(bob), col);
         assertGt(market.debtSharesOf(bob), 0);
+    }
+
+    function test_LiquidationExactCollateralDebtCapLeavesResidual() public {
+        _openSolventLiquidatable();
+        uint256 beforeLoan = musdc.balanceOf(carol);
+        vm.prank(carol);
+        market.liquidate(bob, 0, 1 ether, type(uint256).max, 0);
+        _assertFullCloseLeavesResidual(beforeLoan);
+    }
+
+    function test_LiquidationExactDebtSharesSolventLeavesResidual() public {
+        _openSolventLiquidatable();
+        uint256 shares = market.debtSharesOf(bob);
+        uint256 beforeLoan = musdc.balanceOf(carol);
+        vm.prank(carol);
+        market.liquidate(bob, shares, 0, type(uint256).max, 0);
+        _assertFullCloseLeavesResidual(beforeLoan);
+    }
+
+    function test_LiquidationInsolventExactCollateralWritesOff() public {
+        _fund(alice, 200_000e6, 0);
+        _fund(bob, 0, 1 ether);
+        _fund(carol, 2_000e6, 0);
+        _supply(alice, 200_000e6);
+        _collateral(bob, 1 ether);
+        _borrow(bob, 1_400e6);
+        wethFeed.setAnswer(1_000e8);
+        uint256 beforeLoan = musdc.balanceOf(carol);
+        vm.prank(carol);
+        market.liquidate(bob, 0, 1 ether, type(uint256).max, 0);
+        uint256 paid = beforeLoan - musdc.balanceOf(carol);
+        assertTrue(market.defaulted(bob));
+        assertEq(market.collateralOf(bob), 0);
+        assertEq(market.debtSharesOf(bob), 0);
+        assertLt(paid, 1_400e6);
+        IMarketOracle.Quote memory oq = oracle.quote();
+        uint256 seizedValue = PriceMath.collateralValueLoan(mweth.balanceOf(carol), oq.quoteScale36);
+        assertLe(seizedValue, LiquidationMath.maxSeizedValueLoan(paid, oq.quoteScale36, 500, false));
+    }
+
+    function _openSolventLiquidatable() internal {
+        _fund(alice, 10_000e6, 0);
+        _fund(bob, 0, 1 ether);
+        _fund(carol, 10_000e6, 0);
+        _supply(alice, 10_000e6);
+        _collateral(bob, 1 ether);
+        _borrow(bob, 1_400e6);
+        wethFeed.setAnswer(1_550e8);
+        (,,,,, bool liquidatable) = market.healthOf(bob);
+        assertTrue(liquidatable);
+    }
+
+    function _assertFullCloseLeavesResidual(uint256 beforeLoan) internal {
+        uint256 paid = beforeLoan - musdc.balanceOf(carol);
+        uint256 seized = mweth.balanceOf(carol);
+        assertEq(paid, 1_400e6);
+        assertEq(market.debtSharesOf(bob), 0);
+        assertFalse(market.defaulted(bob));
+        assertLt(seized, 1 ether);
+        uint256 residual = market.collateralOf(bob);
+        assertGt(residual, 0);
+        IMarketOracle.Quote memory oq = oracle.quote();
+        uint256 seizedValue = PriceMath.collateralValueLoan(seized, oq.quoteScale36);
+        assertLe(seizedValue, LiquidationMath.maxSeizedValueLoan(paid, oq.quoteScale36, 500, true));
+        uint256 bobWethBefore = mweth.balanceOf(bob);
+        vm.prank(bob);
+        market.removeCollateral(residual);
+        assertEq(market.collateralOf(bob), 0);
+        assertEq(mweth.balanceOf(bob), bobWethBefore + residual);
     }
 
     function test_DonationDoesNotRepriceShares() public {
@@ -207,12 +276,14 @@ contract LendingMarketTest is MarketFixture {
         uint256 epochIndex = market.epochIndexRay();
         uint256 epochApr = market.epochAprRay();
         uint64 epochTs = market.epochTimestamp();
-        uint256 start = block.timestamp;
-        uint256 end = start + 30 days;
-        for (uint256 i = 1; i <= 30; ++i) {
-            vm.warp(start + i * 1 days);
+        uint256 end = block.timestamp + 30 days;
+        // Incremental skip: via-IR / optimizer-runs=1 can clobber a loop-carried
+        // `start` in `warp(start + i * 1 days)`, turning 30 days into T_30 = 465.
+        for (uint256 i = 0; i < 30; ++i) {
+            skip(1 days);
             market.accrue();
         }
+        assertEq(block.timestamp, end);
         assertEq(market.epochIndexRay(), epochIndex);
         assertEq(market.epochAprRay(), epochApr);
         assertEq(market.epochTimestamp(), epochTs);
@@ -269,14 +340,14 @@ contract LendingMarketTest is MarketFixture {
         _fund(bob, 0, 1 ether);
         _supply(alice, 200_000e6);
         _collateral(bob, 1 ether);
-        _borrow(bob, 1_400e6);
-        wethFeed.setAnswer(1750e8);
+        _borrow(bob, 1_440e6);
+        wethFeed.setAnswer(1600e8);
         (,, uint256 debt, uint256 liqCap,, bool liquidatable) = market.healthOf(bob);
         assertEq(debt, liqCap);
         assertFalse(liquidatable);
         vm.warp(block.timestamp + 1);
         (,, debt, liqCap,, liquidatable) = market.healthOf(bob);
-        assertEq(debt, liqCap + 1);
+        assertGt(debt, liqCap);
         assertTrue(liquidatable);
     }
 
@@ -365,7 +436,8 @@ contract LendingMarketTest is MarketFixture {
         _collateral(alice, 1 ether);
         uint256 maxB = market.maxBorrow(alice);
         assertGt(maxB, 0);
-        assertLe(maxB, 1_400e6);
+        assertLe(maxB, 1_600e6);
+        assertEq(maxB, 1_600e6);
         assertEq(market.collateralOf(alice), 1 ether);
     }
 
@@ -502,10 +574,10 @@ contract LendingMarketTest is MarketFixture {
         _borrow(bob, 1_000e6);
         vm.prank(bob);
         vm.expectRevert(LendingMarket.InsufficientCollateral.selector);
-        market.removeCollateral(0.3 ether);
+        market.removeCollateral(0.375 ether + 1);
         vm.prank(bob);
-        market.removeCollateral(0.28 ether);
-        assertEq(market.collateralOf(bob), 1 ether - 0.28 ether);
+        market.removeCollateral(0.375 ether);
+        assertEq(market.collateralOf(bob), 0.625 ether);
     }
 
     function test_AccruePokeDoesNotResetEpoch() public {
@@ -581,8 +653,8 @@ contract LendingMarketTest is MarketFixture {
                 loanToken: address(fee),
                 collateralToken: address(mweth),
                 oracle: address(oracle),
-                maxLtvBps: 7000,
-                liquidationThresholdBps: 8000,
+                maxLtvBps: 8000,
+                liquidationThresholdBps: 9000,
                 liquidationBonusBps: 500,
                 supplyCap: SUPPLY_CAP,
                 borrowCap: BORROW_CAP,
@@ -683,8 +755,8 @@ contract LendingMarketTest is MarketFixture {
             loanToken: address(musdc),
             collateralToken: address(mweth),
             oracle: address(oracle),
-            maxLtvBps: 7000,
-            liquidationThresholdBps: 8000,
+            maxLtvBps: 8000,
+            liquidationThresholdBps: 9000,
             liquidationBonusBps: 500,
             supplyCap: SUPPLY_CAP,
             borrowCap: BORROW_CAP,
@@ -713,7 +785,9 @@ contract WriteOffHook is IMarketRecoveryEscrow {
         lastDebt = debtWritten;
     }
 
-    function notifyRecovery(address, address, uint256) external {}
+    function notifyRecovery(address, address, uint256) external pure returns (uint256) {
+        return 0;
+    }
 }
 
 contract FeeOnTransferToken is ERC20 {

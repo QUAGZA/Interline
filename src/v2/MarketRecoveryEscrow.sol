@@ -37,6 +37,7 @@ contract MarketRecoveryEscrow is ReentrancyGuard, IMarketRecoveryEscrow {
     error ZeroAmount();
     error ZeroAddress();
     error NothingToClaim();
+    error NothingToRecover();
 
     event MarketRegistered(address indexed market);
     event RegistrarSet(address indexed registrar);
@@ -85,8 +86,8 @@ contract MarketRecoveryEscrow is ReentrancyGuard, IMarketRecoveryEscrow {
         emit WriteOffRecorded(episodeCount, market, owner, debtWritten);
     }
 
-    /// @notice Pull recovered loan tokens from the owner's restricted vault. Not payable to the borrower.
-    function notifyRecovery(address market, address owner, uint256 assets) external {
+    /// @notice Pull recovered loan tokens from the owner's restricted vault, capped at remaining liability.
+    function notifyRecovery(address market, address owner, uint256 assets) external nonReentrant returns (uint256 take) {
         if (assets == 0) revert ZeroAmount();
         if (!isMarket[market]) revert NotMarket();
         address vault = IBorrowerVaultFactory(address(LendingMarket(market).vaultFactory())).vaultOf(market, owner);
@@ -94,16 +95,28 @@ contract MarketRecoveryEscrow is ReentrancyGuard, IMarketRecoveryEscrow {
         uint256 id = latestEpisodeOf[market][owner];
         Episode storage e = episodes[id];
         if (e.market != market || e.owner != owner) revert NotMarket();
-        IERC20(e.loanToken).safeTransferFrom(msg.sender, address(this), assets);
-        e.recovered += assets;
-        emit Recovered(id, assets);
+        uint256 remaining = remainingRecoverable(id);
+        uint256 marketLeft = LendingMarket(market).recoveryObligation(owner);
+        if (marketLeft < remaining) remaining = marketLeft;
+        take = assets < remaining ? assets : remaining;
+        if (take == 0) revert NothingToRecover();
+        IERC20(e.loanToken).safeTransferFrom(msg.sender, address(this), take);
+        e.recovered += take;
+        LendingMarket(market).applyRecovery(owner, take);
+        emit Recovered(id, take);
+    }
+
+    function remainingRecoverable(uint256 episodeId) public view returns (uint256) {
+        Episode storage e = episodes[episodeId];
+        return e.debtWritten > e.recovered ? e.debtWritten - e.recovered : 0;
     }
 
     function claimable(uint256 episodeId, address supplier) public view returns (uint256) {
         Episode storage e = episodes[episodeId];
-        if (e.recovered == 0 || e.totalShares == 0) return 0;
+        uint256 recovered = _distributable(e);
+        if (recovered == 0 || e.totalShares == 0) return 0;
         uint256 shares = LendingMarket(e.market).sharesAtSnapshot(supplier, e.snapshotId);
-        uint256 entitled = (shares * e.recovered) / e.totalShares;
+        uint256 entitled = (shares * recovered) / e.totalShares;
         uint256 already = claimed[episodeId][supplier];
         return entitled > already ? entitled - already : 0;
     }
@@ -113,8 +126,13 @@ contract MarketRecoveryEscrow is ReentrancyGuard, IMarketRecoveryEscrow {
         if (pay == 0) revert NothingToClaim();
         Episode storage e = episodes[episodeId];
         uint256 shares = LendingMarket(e.market).sharesAtSnapshot(msg.sender, e.snapshotId);
-        claimed[episodeId][msg.sender] = (shares * e.recovered) / e.totalShares;
+        uint256 recovered = _distributable(e);
+        claimed[episodeId][msg.sender] = (shares * recovered) / e.totalShares;
         IERC20(e.loanToken).safeTransfer(msg.sender, pay);
         emit Claimed(episodeId, msg.sender, pay);
+    }
+
+    function _distributable(Episode storage e) internal view returns (uint256) {
+        return e.recovered < e.debtWritten ? e.recovered : e.debtWritten;
     }
 }

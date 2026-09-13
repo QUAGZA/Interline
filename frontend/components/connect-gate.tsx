@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAccount, useConnect, useDisconnect, useEnsName, useSwitchChain } from "wagmi";
 import { AnimatedNoise } from "@/components/animated-noise";
 import { BitmapChevron } from "@/components/bitmap-chevron";
-import { defaultV2ChainId } from "@/lib/config";
+import { useCatalogChainId } from "@/lib/use-catalog-chain";
 import { chainName } from "@/lib/chains";
 import { shortAddr } from "@/lib/format";
 import { sanitizeReturnUrl } from "@/lib/return-url";
@@ -20,7 +20,8 @@ export function ConnectGate() {
   const { disconnect } = useDisconnect();
   const { switchChain, isPending: switching } = useSwitchChain();
   const { data: ens } = useEnsName({ address, query: { enabled: Boolean(address) } });
-  const onPreferred = isConnected && chainId === defaultV2ChainId;
+  const catalogChain = useCatalogChainId();
+  const onPreferred = isConnected && chainId === catalogChain;
 
   return (
     <section className="relative min-h-[calc(100vh-3.5rem)] flex items-center pl-6 md:pl-16 pr-6 md:pr-12">
@@ -67,16 +68,16 @@ export function ConnectGate() {
             {!onPreferred ? (
               <div className="space-y-3">
                 <p className="font-mono text-xs text-muted-foreground">
-                  Writes on the default catalog ({chainName(defaultV2ChainId)}) need that network. Public reads still use
-                  the route chain, not this wallet chain.
+                  Writes on {chainName(catalogChain)} need that network. Public reads still use the catalog chain, not
+                  this wallet chain.
                 </p>
                 <button
                   type="button"
                   disabled={switching}
-                  onClick={() => switchChain({ chainId: defaultV2ChainId })}
+                  onClick={() => switchChain({ chainId: catalogChain })}
                   className="border border-foreground/20 px-6 py-3 font-mono text-xs uppercase tracking-widest"
                 >
-                  Switch to {chainName(defaultV2ChainId)}
+                  Switch to {chainName(catalogChain)}
                 </button>
               </div>
             ) : null}

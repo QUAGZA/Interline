@@ -1,11 +1,34 @@
+import type { DataSource } from "@/lib/api/types";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-export function SourceBanner({ usingStub }: { usingStub?: boolean }) {
-  if (!usingStub) return null;
+export function SourceBanner({
+  usingStub,
+  stale,
+  source,
+}: {
+  usingStub?: boolean;
+  stale?: boolean;
+  source?: DataSource;
+}) {
+  if (source === "rpc") {
+    return (
+      <p className="border border-border/60 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
+        On-chain reads (indexer offline). Figures come from the catalog RPC, not typed fixtures.
+      </p>
+    );
+  }
+  if (usingStub || source === "stub") {
+    return (
+      <p className="border border-border/60 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
+        Read API is not live — showing typed fixtures (bigint strings). These are not on-chain balances.
+      </p>
+    );
+  }
+  if (!stale) return null;
   return (
     <p className="border border-border/60 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
-      Read API is not live — showing typed fixtures (bigint strings). These are not on-chain balances.
+      Indexer error — showing last-known live data. Figures may be stale.
     </p>
   );
 }

@@ -6,8 +6,8 @@ import {
   HealthCode,
   HexAddress,
   POSITIONS_PAGE_SIZE,
-} from "./primitives.js";
-import { Freshness } from "./freshness.js";
+} from "./primitives";
+import { Freshness } from "./freshness";
 
 export const Position = z.object({
   chainId: ChainId,

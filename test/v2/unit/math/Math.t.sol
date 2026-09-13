@@ -143,7 +143,9 @@ contract PriceMathTest is GoldenMathTest {
         assertEq(scale, g("wethUsdcScale"));
         assertEq(h.collateralValueLoan(1 ether, scale), g("wethUsdcValue1"));
         assertEq(h.borrowCapacity(g("wethUsdcValue1"), 7000), g("ltv70of2000e6"));
+        assertEq(h.borrowCapacity(g("wethUsdcValue1"), 8000), g("lt80of2000e6"));
         assertEq(h.liquidationCapacity(g("wethUsdcValue1"), 8000), g("lt80of2000e6"));
+        assertEq(h.liquidationCapacity(g("wethUsdcValue1"), 9000), 1800e6);
         assertEq(h.healthFactorWad(g("lt80of2000e6"), g("ltv70of2000e6")), g("hf1400on1600"));
         assertTrue(h.originationAllowed(g("ltv70of2000e6"), g("ltv70of2000e6")));
         assertFalse(h.originationAllowed(g("ltv70of2000e6") + 1, g("ltv70of2000e6")));
@@ -208,5 +210,90 @@ contract LiquidationMathTest is GoldenMathTest {
         LiquidationMath.Quote memory q = h.quoteLiq(shares / 2, 0, shares, dust, RAY, scale, 500);
         assertEq(q.collateralOut, dust);
         assertTrue(q.writesOff);
+    }
+
+    function test_ExactCollateralDebtCapMatchesFullClose() public view {
+        uint256 scale = h.quoteScale36(1550e18, 1e18, 18, 6);
+        uint256 shares = h.borrowDebtShares(1_400e6, RAY);
+        LiquidationMath.Quote memory debtQ = h.quoteLiq(shares, 0, shares, 1 ether, RAY, scale, 500);
+        LiquidationMath.Quote memory colQ = h.quoteLiq(0, 1 ether, shares, 1 ether, RAY, scale, 500);
+        assertEq(debtQ.debtSharesBurned, shares);
+        assertEq(colQ.debtSharesBurned, shares);
+        assertEq(debtQ.loanAssetsIn, colQ.loanAssetsIn);
+        assertEq(debtQ.collateralOut, colQ.collateralOut);
+        assertLt(colQ.collateralOut, 1 ether);
+        assertFalse(colQ.writesOff);
+        _assertSeizedBound(colQ, shares, scale, 500);
+        _assertSeizedBound(debtQ, shares, scale, 500);
+    }
+
+    function test_InsolventExactCollateralWritesOffAndBoundsBonus() public view {
+        uint256 scale = h.quoteScale36(1000e18, 1e18, 18, 6);
+        uint256 shares = h.borrowDebtShares(1_400e6, RAY);
+        LiquidationMath.Quote memory colQ = h.quoteLiq(0, 1 ether, shares, 1 ether, RAY, scale, 500);
+        LiquidationMath.Quote memory debtQ = h.quoteLiq(shares, 0, shares, 1 ether, RAY, scale, 500);
+        assertTrue(colQ.writesOff);
+        assertEq(colQ.collateralOut, 1 ether);
+        assertLt(colQ.debtSharesBurned, shares);
+        assertEq(debtQ.collateralOut, 1 ether);
+        _assertSeizedBound(colQ, shares, scale, 500);
+        _assertSeizedBound(debtQ, shares, scale, 500);
+    }
+
+    function test_SolventLiquidatablePartialExactCollateral() public view {
+        uint256 scale = h.quoteScale36(1550e18, 1e18, 18, 6);
+        uint256 shares = h.borrowDebtShares(1_400e6, RAY);
+        uint256 half = 0.4 ether;
+        LiquidationMath.Quote memory q = h.quoteLiq(0, half, shares, 1 ether, RAY, scale, 500);
+        assertLt(q.debtSharesBurned, shares);
+        assertEq(q.collateralOut, half);
+        assertFalse(q.writesOff);
+        _assertSeizedBound(q, shares, scale, 500);
+    }
+
+    function testFuzz_BothQuoteModesSeizedValueBounded(
+        uint128 ownerCollatRaw,
+        uint128 debtAssetsRaw,
+        uint128 requestRaw,
+        uint256 indexRaw,
+        uint256 priceUsdRaw,
+        uint16 bonusRaw,
+        bool exactDebt
+    ) public view {
+        uint256 ownerCollat = bound(uint256(ownerCollatRaw), 1e15, 100 ether);
+        uint256 debtAssets = bound(uint256(debtAssetsRaw), 1e6, 500_000e6);
+        uint256 indexRay = bound(indexRaw, RAY, RAY * 1_000);
+        uint256 priceUsd = bound(priceUsdRaw, 1e18, 10_000e18);
+        uint16 bonusBps = uint16(bound(uint256(bonusRaw), 0, 2_000));
+        uint256 scale = h.quoteScale36(priceUsd, 1e18, 18, 6);
+        uint256 shares = h.borrowDebtShares(debtAssets, indexRay);
+        if (exactDebt) {
+            uint256 reqShares = bound(uint256(requestRaw), 1, shares);
+            LiquidationMath.Quote memory q = h.quoteLiq(reqShares, 0, shares, ownerCollat, indexRay, scale, bonusBps);
+            _assertSeizedBound(q, shares, scale, bonusBps);
+        } else {
+            uint256 reqCollat = bound(uint256(requestRaw), 1, ownerCollat);
+            try h.quoteLiq(0, reqCollat, shares, ownerCollat, indexRay, scale, bonusBps) returns (
+                LiquidationMath.Quote memory q
+            ) {
+                _assertSeizedBound(q, shares, scale, bonusBps);
+                if (q.debtSharesBurned == shares) {
+                    assertLe(q.collateralOut, reqCollat);
+                    LiquidationMath.Quote memory full = h.quoteFullClose(shares, ownerCollat, indexRay, scale, bonusBps);
+                    assertEq(q.loanAssetsIn, full.loanAssetsIn);
+                    assertEq(q.collateralOut, full.collateralOut);
+                    assertFalse(q.writesOff);
+                }
+            } catch {}
+        }
+    }
+
+    function _assertSeizedBound(LiquidationMath.Quote memory q, uint256 ownerShares, uint256 scale, uint16 bonus)
+        internal
+        view
+    {
+        bool capped = q.debtSharesBurned == ownerShares;
+        uint256 seizedValue = h.collateralValueLoan(q.collateralOut, scale);
+        assertLe(seizedValue, h.maxSeizedValueLoan(q.loanAssetsIn, scale, bonus, capped));
     }
 }

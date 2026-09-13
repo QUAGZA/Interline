@@ -1,0 +1,38 @@
+{
+  "chainId": 11155111,
+  "factory": "0x643ab12224e115147d158C93511E91c27e79AEE2",
+  "vaultFactory": "0x4b3Bb74e98DcCa0c0F9369dc7B707f2B0Bc742F5",
+  "recoveryEscrow": "0x29b9A690c5BE9F0edf0F05904AF95178C175F3bC",
+  "lens": "0x49aa904F7cC239bE517C07b99f9027dC021bc728",
+  "startBlock": 11695332,
+  "oracleMode": "simulated",
+  "faucet": "0xc460BDaf4bDea5B3272C2609309B5B7A83A1992D",
+  "loanToken": "0xE673CbE9C36100da049De84374227AE540004D4A",
+  "collateralToken": "0x1F726b53Cd62c17d83f4Fa16D496634f4b8d1d5e",
+  "swapRouter": "0x578762fCD77Ae4FAF1E57D6781EFB51A02399a66",
+  "venue": "0x367D110396d72dAE145783359AE56153D20276Da",
+  "directFactory": "0x28910328557620935Aac0b76dDc1f2E18cdB2010",
+  "directLens": "0x37c03E8010af244B815Bfbc5b987b4929901E37B",
+  "curator": "0xD4BDFB5D999c223ce2f896B0394DC1f62A247f37",
+  "guardian": "0xD4BDFB5D999c223ce2f896B0394DC1f62A247f37",
+  "markets": [
+    {
+      "id": "usdc-weth-wallet",
+      "address": "0xfc844a015A5174b52e294ADd739d08c17b3578Af",
+      "label": "mUSDC / mWETH - Wallet",
+      "deliveryMode": "wallet",
+      "loanSymbol": "mUSDC",
+      "collateralSymbol": "mWETH",
+      "oracle": "0xf6a168ae943C489539F7b12ca24F060E7C221F93"
+    },
+    {
+      "id": "usdc-weth-restricted",
+      "address": "0x73ABfaCc7Aa6f736214Fa18e580f841a17017b41",
+      "label": "mUSDC / mWETH - Restricted",
+      "deliveryMode": "restricted",
+      "loanSymbol": "mUSDC",
+      "collateralSymbol": "mWETH",
+      "oracle": "0xf6a168ae943C489539F7b12ca24F060E7C221F93"
+    }
+  ]
+}

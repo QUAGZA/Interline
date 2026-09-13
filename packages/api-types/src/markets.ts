@@ -8,8 +8,8 @@ import {
   OracleMode,
   OracleStatus,
   TokenRef,
-} from "./primitives.js";
-import { Freshness } from "./freshness.js";
+} from "./primitives";
+import { Freshness } from "./freshness";
 
 export const MarketSummary = z.object({
   chainId: ChainId,

@@ -29,8 +29,8 @@ function marketFixture(): MarketRecord {
     epochAprRay: BASE_APR_RAY,
     supplyCap: 1_000_000_000000n,
     borrowCap: 800_000_000000n,
-    maxLtvBps: 7000,
-    liquidationThresholdBps: 8000,
+    maxLtvBps: 8000,
+    liquidationThresholdBps: 9000,
     liquidationBonusBps: 500,
     defaultPositionCap: 800_000_000000n,
     supplyFrozen: false,
@@ -127,5 +127,51 @@ describe("event apply", () => {
     expect(await store.insertEvent(event)).toBe(true);
     expect(await store.insertEvent(event)).toBe(false);
     expect((await store.listEventsForReplay(31337)).length).toBe(1);
+  });
+
+  it("does not bump pool cash when a direct facility is funded", () => {
+    const FACILITY = "0x00000000000000000000000000000000000000d1";
+    const LENDER = "0x00000000000000000000000000000000000000d2";
+    const BORROWER = "0x00000000000000000000000000000000000000d3";
+    const VAULT = "0x00000000000000000000000000000000000000d4";
+    const state = derivedFromRecords([marketFixture()], [], []);
+    applyEvent(
+      state,
+      ev({
+        eventName: "Supplied",
+        logIndex: 10,
+        args: { supplier: USER, assets: "1000000000", shares: "1", cashAfter: "1000000000", assetsAfter: "1000000000" },
+      }),
+    );
+    const poolCash = [...state.markets.values()][0]!.accountedCash;
+    applyEvent(
+      state,
+      ev({
+        eventName: "FacilityCreated",
+        address: "0x00000000000000000000000000000000000000f0",
+        logIndex: 11,
+        args: {
+          facility: FACILITY,
+          lender: LENDER,
+          borrower: BORROWER,
+          vault: VAULT,
+          termsHash: `0x${"aa".repeat(32)}`,
+          creator: LENDER,
+        },
+      }),
+    );
+    applyEvent(
+      state,
+      ev({
+        eventName: "Funded",
+        address: FACILITY,
+        logIndex: 12,
+        args: { lender: LENDER, assets: "500000000", cashAfter: "500000000" },
+      }),
+    );
+    expect([...state.markets.values()][0]!.accountedCash).toBe(poolCash);
+    expect([...state.facilities.values()][0]!.accountedCash).toBe(500_000000n);
+    expect([...state.history.values()]).toHaveLength(1);
+    expect([...state.cashflows.values()][0]!.kind).toBe("fund");
   });
 });

@@ -4,16 +4,21 @@ import {
   asAddress,
   type ChainConfig,
   type CursorRecord,
+  cursorHydrationDefaults,
+  type DirectAuxiliary,
+  type DirectFacilityRecord,
+  type DirectHistoryRecord,
   type Hex,
   type IndexedEventRecord,
   type MarketRecord,
   type OracleStatus,
   type PositionRecord,
   type VaultRecord,
+  ZERO_ADDRESS,
 } from "../domain.js";
 import { emptyMarket } from "./memory.js";
 import * as schema from "./schema.js";
-import type { EventListQuery, IndexerStore } from "./store.js";
+import type { EventListQuery, IndexedRangeCommit, IndexerStore } from "./store.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -163,7 +168,10 @@ function positionValues(p: PositionRecord) {
 }
 
 export class PgStore implements IndexerStore {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly nested = false,
+  ) {}
 
   async ping(): Promise<boolean> {
     await this.db.execute(sql`select 1`);
@@ -174,6 +182,8 @@ export class PgStore implements IndexerStore {
     const rows = await this.db.select().from(schema.indexerCursors).where(eq(schema.indexerCursors.chainId, chainId));
     const row = rows[0];
     if (!row) return null;
+    const updatedAt = row.updatedAt.toISOString();
+    const defaults = cursorHydrationDefaults({ updatedAt });
     return {
       chainId: row.chainId,
       startBlock: row.startBlock,
@@ -182,35 +192,70 @@ export class PgStore implements IndexerStore {
       lastTimestamp: row.lastTimestamp,
       headBlock: row.headBlock,
       lastError: row.lastError,
-      updatedAt: row.updatedAt.toISOString(),
+      updatedAt,
+      hydratedBlockNumber: row.hydratedBlockNumber ?? defaults.hydratedBlockNumber,
+      hydratedBlockHash: (row.hydratedBlockHash as Hex | null) ?? defaults.hydratedBlockHash,
+      hydratedBlockTimestamp: row.hydratedBlockTimestamp ?? defaults.hydratedBlockTimestamp,
+      lastHydratedAt: row.lastHydratedAt?.toISOString() ?? defaults.lastHydratedAt,
+      lastPolledAt: row.lastPolledAt?.toISOString() ?? defaults.lastPolledAt,
+      hydrationOk: row.hydrationOk ?? defaults.hydrationOk,
     };
   }
 
   async upsertCursor(cursor: CursorRecord): Promise<void> {
+    const values = {
+      chainId: cursor.chainId,
+      startBlock: cursor.startBlock,
+      lastBlock: cursor.lastBlock,
+      lastHash: cursor.lastHash,
+      lastTimestamp: cursor.lastTimestamp,
+      headBlock: cursor.headBlock,
+      lastError: cursor.lastError,
+      updatedAt: new Date(),
+      hydratedBlockNumber: cursor.hydratedBlockNumber,
+      hydratedBlockHash: cursor.hydratedBlockHash,
+      hydratedBlockTimestamp: cursor.hydratedBlockTimestamp,
+      lastHydratedAt: cursor.lastHydratedAt ? new Date(cursor.lastHydratedAt) : null,
+      lastPolledAt: cursor.lastPolledAt ? new Date(cursor.lastPolledAt) : new Date(),
+      hydrationOk: cursor.hydrationOk,
+    };
     await this.db
       .insert(schema.indexerCursors)
-      .values({
-        chainId: cursor.chainId,
-        startBlock: cursor.startBlock,
-        lastBlock: cursor.lastBlock,
-        lastHash: cursor.lastHash,
-        lastTimestamp: cursor.lastTimestamp,
-        headBlock: cursor.headBlock,
-        lastError: cursor.lastError,
-        updatedAt: new Date(),
-      })
+      .values(values)
       .onConflictDoUpdate({
         target: schema.indexerCursors.chainId,
         set: {
-          startBlock: cursor.startBlock,
-          lastBlock: cursor.lastBlock,
-          lastHash: cursor.lastHash,
-          lastTimestamp: cursor.lastTimestamp,
-          headBlock: cursor.headBlock,
-          lastError: cursor.lastError,
-          updatedAt: new Date(),
+          startBlock: values.startBlock,
+          lastBlock: values.lastBlock,
+          lastHash: values.lastHash,
+          lastTimestamp: values.lastTimestamp,
+          headBlock: values.headBlock,
+          lastError: values.lastError,
+          updatedAt: values.updatedAt,
+          hydratedBlockNumber: values.hydratedBlockNumber,
+          hydratedBlockHash: values.hydratedBlockHash,
+          hydratedBlockTimestamp: values.hydratedBlockTimestamp,
+          lastHydratedAt: values.lastHydratedAt,
+          lastPolledAt: values.lastPolledAt,
+          hydrationOk: values.hydrationOk,
         },
       });
+  }
+
+  async commitIndexedRange(commit: IndexedRangeCommit): Promise<void> {
+    const apply = async (store: PgStore) => {
+      for (const block of commit.blocks) await store.putBlock(block);
+      for (const event of commit.events) await store.insertEvent(event);
+      await store.replaceChainDerived(commit.chainId, commit.derived);
+      await store.upsertCursor(commit.cursor);
+    };
+    if (this.nested) {
+      await apply(this);
+      return;
+    }
+    await this.db.transaction(async (tx) => {
+      await apply(new PgStore(tx as Db, true));
+    });
   }
 
   async getBlockHash(chainId: number, blockNumber: bigint): Promise<Hex | null> {
@@ -371,14 +416,23 @@ export class PgStore implements IndexerStore {
 
   async replaceChainDerived(
     chainId: number,
-    data: { markets: MarketRecord[]; positions: PositionRecord[]; vaults: VaultRecord[] },
+    data: {
+      markets: MarketRecord[];
+      positions: PositionRecord[];
+      vaults: VaultRecord[];
+      facilities?: DirectFacilityRecord[];
+      auxiliary?: DirectAuxiliary;
+    },
   ): Promise<void> {
     await this.db.delete(schema.positions).where(eq(schema.positions.chainId, chainId));
     await this.db.delete(schema.vaults).where(eq(schema.vaults.chainId, chainId));
     await this.db.delete(schema.markets).where(eq(schema.markets.chainId, chainId));
+    await this.db.delete(schema.directFacilities).where(eq(schema.directFacilities.chainId, chainId));
     for (const m of data.markets) await this.upsertMarket(m);
     for (const p of data.positions) await this.upsertPosition(p);
     for (const v of data.vaults) await this.upsertVault(v);
+    for (const f of data.facilities ?? []) await this.upsertDirectFacility(f);
+    if (data.auxiliary) await this.replaceDirectAuxiliary(chainId, data.auxiliary);
   }
 
   async getPosition(chainId: number, marketId: string, owner: string): Promise<PositionRecord | null> {
@@ -453,4 +507,287 @@ export class PgStore implements IndexerStore {
       await this.upsertMarket(emptyMarket(config, listed));
     }
   }
+
+  async listDirectFacilities(chainId?: number): Promise<DirectFacilityRecord[]> {
+    const rows =
+      chainId === undefined
+        ? await this.db.select().from(schema.directFacilities)
+        : await this.db.select().from(schema.directFacilities).where(eq(schema.directFacilities.chainId, chainId));
+    return rows.map(mapDirect);
+  }
+
+  async getDirectFacility(chainId: number, facility: string): Promise<DirectFacilityRecord | null> {
+    const rows = await this.db
+      .select()
+      .from(schema.directFacilities)
+      .where(and(eq(schema.directFacilities.chainId, chainId), eq(schema.directFacilities.facility, facility.toLowerCase())));
+    return rows[0] ? mapDirect(rows[0]) : null;
+  }
+
+  async upsertDirectFacility(row: DirectFacilityRecord): Promise<void> {
+    const values = {
+      chainId: row.chainId,
+      facility: row.facility.toLowerCase(),
+      lender: row.lender.toLowerCase(),
+      borrower: row.borrower.toLowerCase(),
+      vault: row.vault.toLowerCase(),
+      asset: row.asset.toLowerCase(),
+      termsHash: row.termsHash,
+      lenderAccepted: row.lenderAccepted,
+      borrowerAccepted: row.borrowerAccepted,
+      declined: row.declined,
+      cancelled: row.cancelled,
+      ended: row.ended,
+      acceptanceDeadline: row.acceptanceDeadline.toString(10),
+      activatedAt: row.activatedAt.toString(10),
+      borrowExpiry: row.borrowExpiry.toString(10),
+      repaymentDueAt: row.repaymentDueAt.toString(10),
+      creditLimit: row.creditLimit.toString(10),
+      accountedCash: row.accountedCash.toString(10),
+      debtShares: row.debtShares.toString(10),
+      principal: row.principal.toString(10),
+      lastDebt: row.lastDebt.toString(10),
+      aprRay: row.aprRay.toString(10),
+      recallDeadline: row.recallDeadline.toString(10),
+      recallActive: row.recallActive,
+      borrowingPaused: row.borrowingPaused,
+      venue: (row.venue ?? ZERO_ADDRESS).toLowerCase(),
+      swapRouter: (row.swapRouter ?? ZERO_ADDRESS).toLowerCase(),
+      otherToken: (row.otherToken ?? ZERO_ADDRESS).toLowerCase(),
+      borrowPeriod: (row.borrowPeriod ?? 0n).toString(10),
+      recallWindow: (row.recallWindow ?? 0n).toString(10),
+    };
+    await this.db
+      .insert(schema.directFacilities)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [schema.directFacilities.chainId, schema.directFacilities.facility],
+        set: values,
+      });
+  }
+
+  async listDirectAuxiliary(chainId: number): Promise<DirectAuxiliary> {
+    const [terms, acceptances, cashflows, caps, recalls, history] = await Promise.all([
+      this.db.select().from(schema.directTerms).where(eq(schema.directTerms.chainId, chainId)),
+      this.db.select().from(schema.directAcceptances).where(eq(schema.directAcceptances.chainId, chainId)),
+      this.db.select().from(schema.directCashflows).where(eq(schema.directCashflows.chainId, chainId)),
+      this.db.select().from(schema.directCapProposals).where(eq(schema.directCapProposals.chainId, chainId)),
+      this.db.select().from(schema.directRecallEpisodes).where(eq(schema.directRecallEpisodes.chainId, chainId)),
+      this.db.select().from(schema.directHistory).where(eq(schema.directHistory.chainId, chainId)),
+    ]);
+    return {
+      terms: terms.map((t) => ({
+        chainId: t.chainId,
+        facility: asAddress(t.facility),
+        loanToken: asAddress(t.loanToken),
+        creditLimit: big(t.creditLimit),
+        aprRay: big(t.aprRay),
+        acceptanceLifetime: big(t.acceptanceLifetime),
+        borrowPeriod: big(t.borrowPeriod),
+        recallWindow: big(t.recallWindow),
+        venue: asAddress(t.venue),
+        swapRouter: asAddress(t.swapRouter),
+        otherToken: asAddress(t.otherToken),
+        termsHash: (t.termsHash.startsWith("0x") ? t.termsHash : `0x${t.termsHash}`) as DirectFacilityRecord["termsHash"],
+      })),
+      acceptances: acceptances.map((a) => ({
+        chainId: a.chainId,
+        facility: asAddress(a.facility),
+        party: asAddress(a.party),
+        accepted: a.accepted,
+        txHash: a.txHash as Hex,
+        logIndex: a.logIndex,
+        timestamp: big(a.timestamp),
+      })),
+      cashflows: cashflows.map((c) => ({
+        chainId: c.chainId,
+        facility: asAddress(c.facility),
+        kind: c.kind,
+        assets: big(c.assets),
+        cashAfter: big(c.cashAfter),
+        debtAfter: big(c.debtAfter),
+        txHash: c.txHash as Hex,
+        logIndex: c.logIndex,
+        blockNumber: c.blockNumber,
+        timestamp: big(c.timestamp),
+      })),
+      caps: caps.map((c) => ({
+        chainId: c.chainId,
+        facility: asAddress(c.facility),
+        digest: (c.digest.startsWith("0x") ? c.digest : `0x${c.digest}`) as Hex,
+        proposer: asAddress(c.proposer),
+        nonce: big(c.nonce),
+        validUntil: big(c.validUntil),
+        newCap: big(c.newCap),
+        lenderApproved: c.lenderApproved,
+        borrowerApproved: c.borrowerApproved,
+        cancelled: c.cancelled,
+        executed: c.executed,
+      })),
+      recalls: recalls.map((r) => ({
+        chainId: r.chainId,
+        facility: asAddress(r.facility),
+        reasonHash: (r.reasonHash.startsWith("0x") ? r.reasonHash : `0x${r.reasonHash}`) as Hex,
+        reasonCode: r.reasonCode,
+        deadline: big(r.deadline),
+        cleared: r.cleared,
+        startedTxHash: r.startedTxHash as Hex,
+        startedLogIndex: r.startedLogIndex,
+        timestamp: big(r.timestamp),
+      })),
+      history: history.map(mapHistory),
+    };
+  }
+
+  async replaceDirectAuxiliary(chainId: number, aux: DirectAuxiliary): Promise<void> {
+    await this.db.delete(schema.directTerms).where(eq(schema.directTerms.chainId, chainId));
+    await this.db.delete(schema.directAcceptances).where(eq(schema.directAcceptances.chainId, chainId));
+    await this.db.delete(schema.directCashflows).where(eq(schema.directCashflows.chainId, chainId));
+    await this.db.delete(schema.directCapProposals).where(eq(schema.directCapProposals.chainId, chainId));
+    await this.db.delete(schema.directRecallEpisodes).where(eq(schema.directRecallEpisodes.chainId, chainId));
+    await this.db.delete(schema.directHistory).where(eq(schema.directHistory.chainId, chainId));
+    for (const t of aux.terms) {
+      await this.db.insert(schema.directTerms).values({
+        chainId: t.chainId,
+        facility: t.facility.toLowerCase(),
+        loanToken: t.loanToken.toLowerCase(),
+        creditLimit: t.creditLimit.toString(10),
+        aprRay: t.aprRay.toString(10),
+        acceptanceLifetime: t.acceptanceLifetime.toString(10),
+        borrowPeriod: t.borrowPeriod.toString(10),
+        recallWindow: t.recallWindow.toString(10),
+        venue: t.venue.toLowerCase(),
+        swapRouter: t.swapRouter.toLowerCase(),
+        otherToken: t.otherToken.toLowerCase(),
+        termsHash: t.termsHash,
+      });
+    }
+    for (const a of aux.acceptances) {
+      await this.db.insert(schema.directAcceptances).values({
+        chainId: a.chainId,
+        facility: a.facility.toLowerCase(),
+        party: a.party.toLowerCase(),
+        accepted: a.accepted,
+        txHash: a.txHash.toLowerCase(),
+        logIndex: a.logIndex,
+        timestamp: a.timestamp.toString(10),
+      });
+    }
+    for (const c of aux.cashflows) {
+      await this.db.insert(schema.directCashflows).values({
+        chainId: c.chainId,
+        facility: c.facility.toLowerCase(),
+        kind: c.kind,
+        assets: c.assets.toString(10),
+        cashAfter: c.cashAfter.toString(10),
+        debtAfter: c.debtAfter.toString(10),
+        txHash: c.txHash.toLowerCase(),
+        logIndex: c.logIndex,
+        blockNumber: c.blockNumber,
+        timestamp: c.timestamp.toString(10),
+      });
+    }
+    for (const c of aux.caps) {
+      await this.db.insert(schema.directCapProposals).values({
+        chainId: c.chainId,
+        facility: c.facility.toLowerCase(),
+        digest: c.digest,
+        proposer: c.proposer.toLowerCase(),
+        nonce: c.nonce.toString(10),
+        validUntil: c.validUntil.toString(10),
+        newCap: c.newCap.toString(10),
+        lenderApproved: c.lenderApproved,
+        borrowerApproved: c.borrowerApproved,
+        cancelled: c.cancelled,
+        executed: c.executed,
+      });
+    }
+    for (const r of aux.recalls) {
+      await this.db.insert(schema.directRecallEpisodes).values({
+        chainId: r.chainId,
+        facility: r.facility.toLowerCase(),
+        reasonHash: r.reasonHash,
+        reasonCode: r.reasonCode,
+        deadline: r.deadline.toString(10),
+        cleared: r.cleared,
+        startedTxHash: r.startedTxHash.toLowerCase(),
+        startedLogIndex: r.startedLogIndex,
+        timestamp: r.timestamp.toString(10),
+      });
+    }
+    for (const h of aux.history) {
+      await this.db.insert(schema.directHistory).values({
+        chainId: h.chainId,
+        facility: h.facility.toLowerCase(),
+        cash: h.cash.toString(10),
+        debt: h.debt.toString(10),
+        principal: h.principal.toString(10),
+        creditLimit: h.creditLimit.toString(10),
+        txHash: h.txHash.toLowerCase(),
+        logIndex: h.logIndex,
+        blockNumber: h.blockNumber,
+        timestamp: h.timestamp.toString(10),
+      });
+    }
+  }
+
+  async listDirectHistory(chainId: number, facility: string): Promise<DirectHistoryRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(schema.directHistory)
+      .where(and(eq(schema.directHistory.chainId, chainId), eq(schema.directHistory.facility, facility.toLowerCase())));
+    return rows
+      .map(mapHistory)
+      .sort((a, b) => (a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1));
+  }
+}
+
+function mapDirect(row: typeof schema.directFacilities.$inferSelect): DirectFacilityRecord {
+  return {
+    chainId: row.chainId,
+    facility: asAddress(row.facility),
+    lender: asAddress(row.lender),
+    borrower: asAddress(row.borrower),
+    vault: asAddress(row.vault),
+    asset: asAddress(row.asset),
+    termsHash: (row.termsHash.startsWith("0x") ? row.termsHash : `0x${row.termsHash}`) as DirectFacilityRecord["termsHash"],
+    lenderAccepted: row.lenderAccepted,
+    borrowerAccepted: row.borrowerAccepted,
+    declined: row.declined,
+    cancelled: row.cancelled,
+    ended: row.ended,
+    acceptanceDeadline: big(row.acceptanceDeadline),
+    activatedAt: big(row.activatedAt),
+    borrowExpiry: big(row.borrowExpiry),
+    repaymentDueAt: big(row.repaymentDueAt),
+    creditLimit: big(row.creditLimit),
+    accountedCash: big(row.accountedCash),
+    debtShares: big(row.debtShares),
+    principal: big(row.principal),
+    lastDebt: big(row.lastDebt),
+    aprRay: big(row.aprRay),
+    recallDeadline: big(row.recallDeadline),
+    recallActive: row.recallActive,
+    borrowingPaused: row.borrowingPaused,
+    venue: asAddress(row.venue),
+    swapRouter: asAddress(row.swapRouter),
+    otherToken: asAddress(row.otherToken),
+    borrowPeriod: big(row.borrowPeriod),
+    recallWindow: big(row.recallWindow),
+  };
+}
+
+function mapHistory(row: typeof schema.directHistory.$inferSelect): DirectHistoryRecord {
+  return {
+    chainId: row.chainId,
+    facility: asAddress(row.facility),
+    cash: big(row.cash),
+    debt: big(row.debt),
+    principal: big(row.principal),
+    creditLimit: big(row.creditLimit),
+    txHash: row.txHash as Hex,
+    logIndex: row.logIndex,
+    blockNumber: row.blockNumber,
+    timestamp: big(row.timestamp),
+  };
 }

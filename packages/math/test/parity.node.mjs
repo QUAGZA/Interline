@@ -52,6 +52,7 @@ const {
   liquidationCapacity,
   maxLoanAssetsIn,
   maxRedeemShares,
+  maxSeizedValueLoan,
   maxWithdrawAssets,
   minCollateralOut,
   mintSupplyShares,
@@ -125,8 +126,10 @@ assert.equal(DEBT_DENOMINATOR, g("debtDenominator"));
 const scale = quoteScale36(2000n * 10n ** 18n, 10n ** 18n, 18, 6);
 assert.equal(scale, g("wethUsdcScale"));
 assert.equal(collateralValueLoan(10n ** 18n, scale), g("wethUsdcValue1"));
-assert.equal(borrowCapacity(g("wethUsdcValue1"), DEFAULT_LTV_BPS), g("ltv70of2000e6"));
-assert.equal(liquidationCapacity(g("wethUsdcValue1"), DEFAULT_LT_BPS), g("lt80of2000e6"));
+assert.equal(borrowCapacity(g("wethUsdcValue1"), 7000n), g("ltv70of2000e6"));
+assert.equal(borrowCapacity(g("wethUsdcValue1"), DEFAULT_LTV_BPS), g("lt80of2000e6"));
+assert.equal(liquidationCapacity(g("wethUsdcValue1"), 8000n), g("lt80of2000e6"));
+assert.equal(liquidationCapacity(g("wethUsdcValue1"), DEFAULT_LT_BPS), 1_800_000_000n);
 assert.equal(healthFactorWad(g("lt80of2000e6"), g("ltv70of2000e6")), g("hf1400on1600"));
 const cap = 100n * 10n ** 6n;
 assert.equal(healthFactorWad(cap, cap), 10n ** 18n);
@@ -170,6 +173,47 @@ const b = quoteLiquidation({
   bonusBps: 500n,
 });
 assert.equal(b.debtSharesBurned > 0n, true);
+
+const a01Scale = quoteScale36(1550n * 10n ** 18n, 10n ** 18n, 18, 6);
+const a01Shares = borrowDebtShares(1_400n * 10n ** 6n, RAY);
+const a01Args = {
+  ownerDebtShares: a01Shares,
+  ownerCollateral: 10n ** 18n,
+  indexRay: RAY,
+  scale36: a01Scale,
+  bonusBps: 500n,
+};
+const a01Debt = quoteLiquidation({ exactDebtShares: a01Shares, exactCollateral: 0n, ...a01Args });
+const a01Col = quoteLiquidation({ exactDebtShares: 0n, exactCollateral: 10n ** 18n, ...a01Args });
+assert.equal(a01Col.debtSharesBurned, a01Shares);
+assert.equal(a01Col.loanAssetsIn, a01Debt.loanAssetsIn);
+assert.equal(a01Col.collateralOut, a01Debt.collateralOut);
+assert.equal(a01Col.collateralOut < 10n ** 18n, true);
+assert.equal(a01Col.writesOff, false);
+assert.equal(
+  collateralValueLoan(a01Col.collateralOut, a01Scale) <=
+    maxSeizedValueLoan(a01Col.loanAssetsIn, a01Scale, 500n, true),
+  true,
+);
+
+const insolventScale = quoteScale36(1000n * 10n ** 18n, 10n ** 18n, 18, 6);
+const insolventCol = quoteLiquidation({
+  exactDebtShares: 0n,
+  exactCollateral: 10n ** 18n,
+  ownerDebtShares: a01Shares,
+  ownerCollateral: 10n ** 18n,
+  indexRay: RAY,
+  scale36: insolventScale,
+  bonusBps: 500n,
+});
+assert.equal(insolventCol.writesOff, true);
+assert.equal(insolventCol.collateralOut, 10n ** 18n);
+assert.equal(insolventCol.debtSharesBurned < a01Shares, true);
+assert.equal(
+  collateralValueLoan(insolventCol.collateralOut, insolventScale) <=
+    maxSeizedValueLoan(insolventCol.loanAssetsIn, insolventScale, 500n, false),
+  true,
+);
 
 const ids = [];
 const values = [];

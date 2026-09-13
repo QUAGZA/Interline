@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { motion } from "framer-motion";
 import { useMemo, useState, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import { Volume2, VolumeX } from "lucide-react";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 interface SplitFlapAudioValue {
   isMuted: boolean;
@@ -133,6 +134,7 @@ function SplitFlapTextInner({ text, className = "", speed = 50 }: SplitFlapTextP
   const [animationKey, setAnimationKey] = useState(0);
   const [hasInitialized, setHasInitialized] = useState(false);
   const audio = useSplitFlapAudio();
+  const reduced = usePrefersReducedMotion();
 
   const handleMouseEnter = useCallback(() => {
     setAnimationKey((prev) => prev + 1);
@@ -148,8 +150,10 @@ function SplitFlapTextInner({ text, className = "", speed = 50 }: SplitFlapTextP
   return (
     <div
       className={`inline-flex gap-[0.08em] items-center cursor-pointer ${className}`}
+      role="img"
       aria-label={text}
-      onMouseEnter={handleMouseEnter}
+      data-motion={reduced ? "static" : "animated"}
+      onMouseEnter={reduced ? undefined : handleMouseEnter}
       style={{ perspective: "1000px" }}
     >
       {chars.map((char, index) => (
@@ -158,9 +162,10 @@ function SplitFlapTextInner({ text, className = "", speed = 50 }: SplitFlapTextP
           char={char.toUpperCase()}
           index={index}
           animationKey={animationKey}
-          skipEntrance={hasInitialized}
+          skipEntrance={hasInitialized || reduced}
           speed={speed}
-          playClick={audio?.playClick}
+          playClick={reduced ? undefined : audio?.playClick}
+          reduced={reduced}
         />
       ))}
     </div>
@@ -178,9 +183,10 @@ interface SplitFlapCharProps {
   skipEntrance: boolean;
   speed: number;
   playClick?: () => void;
+  reduced?: boolean;
 }
 
-function SplitFlapChar({ char, index, animationKey, skipEntrance, speed, playClick }: SplitFlapCharProps) {
+function SplitFlapChar({ char, index, animationKey, skipEntrance, speed, playClick, reduced }: SplitFlapCharProps) {
   const displayChar = CHARSET.includes(char) ? char : " ";
   const isSpace = char === " ";
   const [currentChar, setCurrentChar] = useState(skipEntrance ? displayChar : " ");
@@ -196,6 +202,12 @@ function SplitFlapChar({ char, index, animationKey, skipEntrance, speed, playCli
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    if (reduced) {
+      setCurrentChar(displayChar);
+      setIsSettled(true);
+      return;
+    }
 
     if (isSpace) {
       setCurrentChar(" ");
@@ -233,7 +245,7 @@ function SplitFlapChar({ char, index, animationKey, skipEntrance, speed, playCli
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [displayChar, isSpace, tileDelay, animationKey, skipEntrance, index, speed, playClick]);
+  }, [displayChar, isSpace, tileDelay, animationKey, skipEntrance, index, speed, playClick, reduced]);
 
   if (isSpace) {
     return (
@@ -248,9 +260,9 @@ function SplitFlapChar({ char, index, animationKey, skipEntrance, speed, playCli
 
   return (
     <motion.div
-      initial={skipEntrance ? false : { opacity: 0, y: 20 }}
+      initial={reduced || skipEntrance ? false : { opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: tileDelay, duration: 0.3, ease: "easeOut" }}
+      transition={{ delay: reduced ? 0 : tileDelay, duration: reduced ? 0 : 0.3, ease: "easeOut" }}
       className="relative overflow-hidden flex items-center justify-center font-[family-name:var(--font-bebas)]"
       style={{
         fontSize: "clamp(4rem, 15vw, 14rem)",

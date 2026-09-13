@@ -26,6 +26,7 @@ import {
   liquidationCapacity,
   maxLoanAssetsIn,
   maxRedeemShares,
+  maxSeizedValueLoan,
   maxWithdrawAssets,
   minCollateralOut,
   mintSupplyShares,
@@ -129,8 +130,10 @@ describe("Price and liquidation twins", () => {
     const scale = quoteScale36(2000n * 10n ** 18n, 10n ** 18n, 18, 6);
     expect(scale).toBe(g("wethUsdcScale"));
     expect(collateralValueLoan(10n ** 18n, scale)).toBe(g("wethUsdcValue1"));
-    expect(borrowCapacity(g("wethUsdcValue1"), DEFAULT_LTV_BPS)).toBe(g("ltv70of2000e6"));
-    expect(liquidationCapacity(g("wethUsdcValue1"), DEFAULT_LT_BPS)).toBe(g("lt80of2000e6"));
+        expect(borrowCapacity(g("wethUsdcValue1"), 7000n)).toBe(g("ltv70of2000e6"));
+        expect(borrowCapacity(g("wethUsdcValue1"), DEFAULT_LTV_BPS)).toBe(g("lt80of2000e6"));
+        expect(liquidationCapacity(g("wethUsdcValue1"), 8000n)).toBe(g("lt80of2000e6"));
+        expect(liquidationCapacity(g("wethUsdcValue1"), DEFAULT_LT_BPS)).toBe(1_800_000_000n);
     expect(healthFactorWad(g("lt80of2000e6"), g("ltv70of2000e6"))).toBe(g("hf1400on1600"));
     const cap = 100n * 10n ** 6n;
     expect(healthFactorWad(cap, cap)).toBe(10n ** 18n);
@@ -177,6 +180,92 @@ describe("Price and liquidation twins", () => {
       bonusBps: 500n,
     });
     expect(b.debtSharesBurned > 0n).toBe(true);
+  });
+
+  it("caps exact-collateral output at repayment plus bonus when debt binds", () => {
+    const scale = quoteScale36(1550n * 10n ** 18n, 10n ** 18n, 18, 6);
+    const shares = borrowDebtShares(1_400n * 10n ** 6n, RAY);
+    const args = {
+      ownerDebtShares: shares,
+      ownerCollateral: 10n ** 18n,
+      indexRay: RAY,
+      scale36: scale,
+      bonusBps: 500n,
+    };
+    const debtQ = quoteLiquidation({ exactDebtShares: shares, exactCollateral: 0n, ...args });
+    const colQ = quoteLiquidation({ exactDebtShares: 0n, exactCollateral: 10n ** 18n, ...args });
+    expect(colQ.debtSharesBurned).toBe(shares);
+    expect(colQ.loanAssetsIn).toBe(debtQ.loanAssetsIn);
+    expect(colQ.collateralOut).toBe(debtQ.collateralOut);
+    expect(colQ.collateralOut < 10n ** 18n).toBe(true);
+    expect(colQ.writesOff).toBe(false);
+    const seized = collateralValueLoan(colQ.collateralOut, scale);
+    expect(seized <= maxSeizedValueLoan(colQ.loanAssetsIn, scale, 500n, true)).toBe(true);
+  });
+
+  it("bounds insolvent exact-collateral and keeps write-off", () => {
+    const scale = quoteScale36(1000n * 10n ** 18n, 10n ** 18n, 18, 6);
+    const shares = borrowDebtShares(1_400n * 10n ** 6n, RAY);
+    const colQ = quoteLiquidation({
+      exactDebtShares: 0n,
+      exactCollateral: 10n ** 18n,
+      ownerDebtShares: shares,
+      ownerCollateral: 10n ** 18n,
+      indexRay: RAY,
+      scale36: scale,
+      bonusBps: 500n,
+    });
+    expect(colQ.writesOff).toBe(true);
+    expect(colQ.collateralOut).toBe(10n ** 18n);
+    expect(colQ.debtSharesBurned < shares).toBe(true);
+    const seized = collateralValueLoan(colQ.collateralOut, scale);
+    expect(seized <= maxSeizedValueLoan(colQ.loanAssetsIn, scale, 500n, false)).toBe(true);
+  });
+
+  it("fuzzes both quote modes against the documented seized-value bound", () => {
+    const prices = [800n, 1000n, 1550n, 2000n, 4000n];
+    const debts = [100n * 10n ** 6n, 1_400n * 10n ** 6n, 50_000n * 10n ** 6n];
+    const collats = [10n ** 16n, 10n ** 18n, 5n * 10n ** 18n];
+    for (const price of prices) {
+      const scale = quoteScale36(price * 10n ** 18n, 10n ** 18n, 18, 6);
+      for (const debt of debts) {
+        const shares = borrowDebtShares(debt, RAY);
+        for (const ownerCollateral of collats) {
+          const debtQ = quoteLiquidation({
+            exactDebtShares: shares,
+            exactCollateral: 0n,
+            ownerDebtShares: shares,
+            ownerCollateral,
+            indexRay: RAY,
+            scale36: scale,
+            bonusBps: 500n,
+          });
+          const seizedDebt = collateralValueLoan(debtQ.collateralOut, scale);
+          expect(seizedDebt <= maxSeizedValueLoan(debtQ.loanAssetsIn, scale, 500n, true)).toBe(true);
+          try {
+            const colQ = quoteLiquidation({
+              exactDebtShares: 0n,
+              exactCollateral: ownerCollateral,
+              ownerDebtShares: shares,
+              ownerCollateral,
+              indexRay: RAY,
+              scale36: scale,
+              bonusBps: 500n,
+            });
+            const capped = colQ.debtSharesBurned === shares;
+            const seizedCol = collateralValueLoan(colQ.collateralOut, scale);
+            expect(seizedCol <= maxSeizedValueLoan(colQ.loanAssetsIn, scale, 500n, capped)).toBe(true);
+            if (capped) {
+              expect(colQ.loanAssetsIn).toBe(debtQ.loanAssetsIn);
+              expect(colQ.collateralOut).toBe(debtQ.collateralOut);
+              expect(colQ.writesOff).toBe(false);
+            }
+          } catch (err) {
+            expect(err instanceof Error && err.message === "ZeroQuote").toBe(true);
+          }
+        }
+      }
+    }
   });
 });
 

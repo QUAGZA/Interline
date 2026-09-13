@@ -27,15 +27,29 @@ export type V2Manifest = {
   loanToken?: Address;
   collateralToken?: Address;
   vaultFactory?: Address;
+  directFactory?: Address;
+  venue?: Address;
+  swapRouter?: Address;
   markets: V2Market[];
 };
 
-export const anvilChain = defineChain({
-  id: 31337,
-  name: "Anvil",
-  nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: [process.env.RPC_URL ?? "http://127.0.0.1:8545"] } },
-});
+const RPC_CANDIDATES = [
+  process.env.RPC_URL,
+  "http://127.0.0.1:8555",
+  "http://127.0.0.1:8546",
+  "http://127.0.0.1:8545",
+].filter((url): url is string => Boolean(url));
+
+export function makeAnvilChain(rpcUrl: string) {
+  return defineChain({
+    id: 31337,
+    name: "Anvil",
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: [rpcUrl] } },
+  });
+}
+
+export const anvilChain = makeAnvilChain(RPC_CANDIDATES[0] ?? "http://127.0.0.1:8545");
 
 export const erc20Abi = parseAbi([
   "function approve(address spender, uint256 amount) returns (bool)",
@@ -95,17 +109,51 @@ export async function rpcReady(url = anvilChain.rpcUrls.default.http[0]): Promis
   }
 }
 
+async function getCode(url: string, address: Address): Promise<string> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_getCode",
+      params: [address, "latest"],
+    }),
+  });
+  const body = (await res.json()) as { result?: string };
+  return body.result ?? "0x";
+}
+
+/** Prefer an Anvil that actually has the V2 factory bytecode, not a stale 8545 node. */
+export async function resolveAnvilRpc(): Promise<string | undefined> {
+  const manifest = loadManifest();
+  const ready: string[] = [];
+  for (const url of RPC_CANDIDATES) {
+    if (await rpcReady(url)) ready.push(url);
+  }
+  if (manifest?.factory) {
+    for (const url of ready) {
+      const code = await getCode(url, manifest.factory);
+      if (code && code !== "0x") return url;
+    }
+    return undefined;
+  }
+  return ready[0];
+}
+
 export function accountAt(index: number) {
   return mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: index });
 }
 
-export function clientsFor(index: number) {
+export function clientsFor(index: number, rpcUrl = anvilChain.rpcUrls.default.http[0]) {
   const account = accountAt(index);
-  const transport = http(anvilChain.rpcUrls.default.http[0]);
+  const chain = makeAnvilChain(rpcUrl);
+  const transport = http(rpcUrl);
   return {
     account,
-    publicClient: createPublicClient({ chain: anvilChain, transport }),
-    walletClient: createWalletClient({ account, chain: anvilChain, transport }),
+    chain,
+    publicClient: createPublicClient({ chain, transport }),
+    walletClient: createWalletClient({ account, chain, transport }),
   };
 }
 
@@ -115,7 +163,6 @@ export async function send(
   request: { to: Address; data?: Hex; account: ReturnType<typeof accountAt> },
 ) {
   const hash = await walletClient.sendTransaction({
-    chain: anvilChain,
     account: request.account,
     to: request.to,
     data: request.data,

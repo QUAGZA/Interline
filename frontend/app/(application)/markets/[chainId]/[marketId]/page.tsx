@@ -24,7 +24,7 @@ export default async function MarketPage({
       <section className="px-6 py-10">
         <h1 className="font-[var(--font-bebas)] text-4xl">INVALID MARKET</h1>
         <p className="mt-3 font-mono text-sm text-muted-foreground">
-          chainId must be 31337 or 84532. marketId is a catalog slug or market address.
+          chainId must be 31337, 84532, or 11155111. marketId is a catalog slug or market address.
         </p>
       </section>
     );

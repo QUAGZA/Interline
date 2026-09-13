@@ -1,45 +1,64 @@
 "use client";
 
 import { formatHorizon, liquidationScenario } from "@/lib/forecast";
-import type { HealthCode } from "@/lib/api/types";
+import type { HealthCode, OracleStatus } from "@/lib/api/types";
 
 const KIND_COPY: Record<ReturnType<typeof liquidationScenario>["kind"], string> = {
   "no-debt": "No debt — no liquidation scenario.",
-  "already-eligible": "Already eligible for liquidation at current simulated prices.",
-  "within-horizon": "Debt would cross the liquidation threshold within the 365-day horizon if prices stay fixed.",
-  "not-in-horizon": "Not eligible within a 365-day horizon at the current borrow APR and fixed prices.",
+  "already-eligible": "Already eligible for liquidation at the frozen snapshot prices.",
+  "within-horizon":
+    "Under frozen prices and a frozen borrow rate, projected debt would exceed liquidation capacity within the 365-day horizon.",
+  "not-in-horizon":
+    "Under frozen prices and a frozen borrow rate, projected debt does not exceed liquidation capacity within 365 days. That is not a claim of no liquidation risk.",
   unavailable: "Oracle unavailable — no numerical scenario.",
+  unknown: "Unknown — source snapshot is stale or projection inputs are incomplete.",
 };
 
 export function LiquidationScenarioCard({
   healthCode,
   liquidatable,
-  debtRaw,
+  oracleStatus,
+  debtShares,
+  epochIndexRay,
+  epochAprRay,
+  epochTimestamp,
+  recordedTimestamp,
   liquidationCapacityRaw,
-  borrowAprRay,
 }: {
   healthCode: HealthCode;
   liquidatable: boolean;
-  debtRaw: string;
+  oracleStatus: OracleStatus;
+  debtShares: string;
+  epochIndexRay: string;
+  epochAprRay: string;
+  epochTimestamp: string;
+  recordedTimestamp: string;
   liquidationCapacityRaw: string;
-  borrowAprRay: string;
 }) {
   const scenario = liquidationScenario({
     healthCode,
     liquidatable,
-    debtRaw,
+    oracleStatus,
+    debtShares,
+    epochIndexRay,
+    epochAprRay,
+    epochTimestamp,
+    recordedTimestamp,
     liquidationCapacityRaw,
-    borrowAprRay,
   });
   return (
     <div className="border border-border/50 bg-card p-4 space-y-2">
       <h3 className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
         Liquidation scenario
       </h3>
+      <p className="font-mono text-[11px] text-muted-foreground">
+        If current prices and the current borrowing rate stayed unchanged.
+      </p>
       <p className="font-mono text-sm text-foreground">{KIND_COPY[scenario.kind]}</p>
       {scenario.kind === "within-horizon" ? (
         <p className="font-mono text-xs text-accent">
-          First liquidatable second (projection): {formatHorizon(scenario.firstLiquidatableSecond)}
+          Scenario offset (frozen price and rate, not a calendar date): {formatHorizon(scenario.firstLiquidatableSecond)}{" "}
+          into the 365-day horizon.
         </p>
       ) : null}
       <p className="font-mono text-[11px] leading-relaxed text-muted-foreground">{scenario.assumptions}</p>

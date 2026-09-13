@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount, usePublicClient, useWalletClient } from "wagmi";
 import { maxUint256, type Hex } from "viem";
 import { toast } from "sonner";
@@ -20,6 +20,8 @@ import { useTxMachine } from "@/features/transactions/tx-store";
 import { runMarketTx } from "@/features/transactions/run-tx";
 import { TxStatusList } from "@/features/transactions/tx-status";
 import { parseTokenInput } from "@/lib/format";
+import { liquidationCapacity } from "@/lib/forecast";
+import { actionKey, latestForKey, newAttemptId, pendingForKey } from "@/lib/tx-attempt";
 
 export function PositionView({
   chainId,
@@ -50,17 +52,20 @@ export function PositionView({
     );
   }
 
-  const liqCapacity = ((BigInt(p.collateralValueLoan.raw) * BigInt(m?.liquidationThresholdBps ?? 8000)) / 10000n).toString();
+  const liqCapacity = liquidationCapacity(
+    BigInt(p.collateralValueLoan.raw || "0"),
+    BigInt(m?.liquidationThresholdBps ?? 9000),
+  ).toString();
 
   return (
     <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-8">
       <PageHeader
         kicker={`${chainName(chainId)} · public loan`}
         title="POSITION"
-        description={`Owner ${shortAddr(owner)}. Third parties may repay or add collateral. Only the owner withdraws, borrows, or removes collateral.`}
+        description={`Owner ${shortAddr(owner)}. The owner can repay, remove collateral, withdraw, or borrow. Third parties may repay or add collateral.`}
         actions={<OracleBanner />}
       />
-      <SourceBanner usingStub={pos.data?.usingStub} />
+      <SourceBanner usingStub={pos.data?.usingStub} stale={pos.data?.stale} source={pos.data?.source} />
       <p className="font-mono text-xs">
         {p.marketLabel} · {p.deliveryMode}
         {p.deliveryMode === "restricted" && p.vaultAddress ? ` · vault ${shortAddr(p.vaultAddress)}` : null}{" "}
@@ -87,7 +92,21 @@ export function PositionView({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-4">
-          {m && isOwner ? <MarketActions market={m} owner={owner} /> : null}
+          {m && isOwner ? (
+            <div className="space-y-3">
+              {BigInt(p.debt.raw) > 0n ? (
+                <p className="font-mono text-[11px] text-accent">
+                  Next: repay partial or full from this screen, then remove collateral once debt is inside max LTV or
+                  cleared.
+                </p>
+              ) : BigInt(p.collateral.raw) > 0n ? (
+                <p className="font-mono text-[11px] text-accent">
+                  Next: no debt — remove remaining collateral from the repay tab when you want it back.
+                </p>
+              ) : null}
+              <MarketActions market={m} owner={owner} debtRaw={p.debt.raw} />
+            </div>
+          ) : null}
           {m && !isOwner && isConnected ? (
             <ThirdPartyActions
               chainId={chainId}
@@ -125,9 +144,13 @@ export function PositionView({
             <LiquidationScenarioCard
               healthCode={p.healthCode}
               liquidatable={p.liquidatable}
-              debtRaw={p.debt.raw}
+              oracleStatus={m.oracleStatus}
+              debtShares={p.debtShares}
+              epochIndexRay={m.epochIndexRay}
+              epochAprRay={m.borrowAprRay}
+              epochTimestamp={m.epochTimestamp}
+              recordedTimestamp={p.freshness.indexedBlockTimestamp}
               liquidationCapacityRaw={liqCapacity}
-              borrowAprRay={m.borrowAprRay}
             />
           ) : null}
           <RecallClock active={p.recallActive} deadlineUnix={p.recallDeadline} nowSec={now} />
@@ -173,8 +196,14 @@ function ThirdPartyActions({
   const publicClient = usePublicClient({ chainId });
   const { data: walletClient } = useWalletClient();
   const tx = useTxMachine();
-  const id = useMemo(() => `repay-${chainId}-${marketId}-${owner}`, [chainId, marketId, owner]);
-  const record = tx.get(id);
+  const key = actionKey({
+    chainId,
+    account: address ?? "disconnected",
+    facility: marketAddress,
+    action: `repay-third-party-${owner}`,
+  });
+  const record = latestForKey(tx.records, key);
+  const busy = Boolean(pendingForKey(tx.records, key));
 
   async function repay() {
     if (!address || !publicClient || !walletClient) return;
@@ -186,7 +215,12 @@ function ThirdPartyActions({
       toast.message("Fixture market — writes wait for a live manifest.");
       return;
     }
+    if (busy) {
+      toast.message("This action is already waiting for a signature or confirmation.");
+      return;
+    }
     const amount = parseTokenInput(human, decimals);
+    const id = newAttemptId(key);
     tx.upsert({
       id,
       kind: "repay",
@@ -244,10 +278,11 @@ function ThirdPartyActions({
       />
       <button
         type="button"
+        disabled={busy}
         onClick={() => void repay()}
-        className="border border-foreground/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest"
+        className="border border-foreground/20 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest disabled:opacity-40"
       >
-        Repay
+        {busy ? record?.phase.replaceAll("_", " ") : "Repay"}
       </button>
       {record ? <TxStatusList records={[record]} /> : null}
     </div>
@@ -275,7 +310,14 @@ function LiquidateButton({
   const publicClient = usePublicClient({ chainId });
   const { data: walletClient } = useWalletClient();
   const tx = useTxMachine();
-  const id = `liquidate-${chainId}-${marketId}-${owner}`;
+  const key = actionKey({
+    chainId,
+    account: address ?? "disconnected",
+    facility: marketAddress ?? "market",
+    action: `liquidate-${owner}`,
+  });
+  const record = latestForKey(tx.records, key);
+  const busy = Boolean(pendingForKey(tx.records, key));
 
   async function run() {
     if (!address || !publicClient || !walletClient || !loan || !marketAddress) return;
@@ -287,6 +329,11 @@ function LiquidateButton({
       toast.message("Fixture market — liquidation waits for a live manifest.");
       return;
     }
+    if (busy) {
+      toast.message("This action is already waiting for a signature or confirmation.");
+      return;
+    }
+    const id = newAttemptId(key);
     tx.upsert({
       id,
       kind: "liquidate",
@@ -333,16 +380,16 @@ function LiquidateButton({
     }
   }
 
-  const record = tx.get(id);
   return (
     <div className="border border-destructive/50 bg-card p-4 space-y-2">
       <p className="font-mono text-[11px] text-destructive">This position is liquidatable at current simulated prices.</p>
       <button
         type="button"
+        disabled={busy}
         onClick={() => void run()}
-        className="border border-destructive bg-destructive px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-primary-foreground"
+        className="border border-destructive bg-destructive px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-primary-foreground disabled:opacity-40"
       >
-        Liquidate
+        {busy ? record?.phase.replaceAll("_", " ") : "Liquidate"}
       </button>
       {record ? <TxStatusList records={[record]} /> : null}
     </div>

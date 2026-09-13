@@ -8,6 +8,7 @@ export const ALLOWED_ENV = [
   "RPC_URL",
   "RPC_URL_31337",
   "RPC_URL_84532",
+  "RPC_URL_11155111",
   "CHAIN_ID",
   "INDEXER_PORT",
   "INDEXER_POLL_MS",
@@ -122,18 +123,22 @@ export function readIndexerEnv(env: NodeJS.ProcessEnv = process.env): IndexerEnv
   assertNoSigningKeys(env);
   const repoRoot = findRepoRoot();
   const rpcUrl = env.RPC_URL ?? "http://127.0.0.1:8545";
-  const rpcByChain = new Map<number, string>();
-  rpcByChain.set(31337, env.RPC_URL_31337 ?? (env.CHAIN_ID === "84532" ? rpcUrl : rpcUrl));
-  if (env.RPC_URL_84532) rpcByChain.set(84532, env.RPC_URL_84532);
-  else if (env.CHAIN_ID === "84532") rpcByChain.set(84532, rpcUrl);
-  if (env.RPC_URL_31337) rpcByChain.set(31337, env.RPC_URL_31337);
-  else if (env.CHAIN_ID !== "84532") rpcByChain.set(31337, rpcUrl);
-
   const chainIdRaw = env.CHAIN_ID;
   const chainId = chainIdRaw ? Number(chainIdRaw) : undefined;
-  if (chainIdRaw && (!Number.isInteger(chainId) || (chainId !== 31337 && chainId !== 84532))) {
+  if (
+    chainIdRaw &&
+    (!Number.isInteger(chainId) || (chainId !== 31337 && chainId !== 84532 && chainId !== 11155111))
+  ) {
     throw new EnvError(`Unsupported CHAIN_ID: ${chainIdRaw}`);
   }
+
+  const rpcByChain = new Map<number, string>();
+  if (env.RPC_URL_31337) rpcByChain.set(31337, env.RPC_URL_31337);
+  else if (chainId === 31337 || chainId === undefined) rpcByChain.set(31337, rpcUrl);
+  if (env.RPC_URL_84532) rpcByChain.set(84532, env.RPC_URL_84532);
+  else if (chainId === 84532) rpcByChain.set(84532, rpcUrl);
+  if (env.RPC_URL_11155111) rpcByChain.set(11155111, env.RPC_URL_11155111);
+  else if (chainId === 11155111) rpcByChain.set(11155111, rpcUrl);
 
   const startBlockRaw = env.START_BLOCK;
   const startBlock = startBlockRaw !== undefined && startBlockRaw !== "" ? BigInt(startBlockRaw) : undefined;

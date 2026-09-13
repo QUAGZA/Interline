@@ -14,11 +14,13 @@ export type V2Market = {
 };
 
 export type V2Manifest = {
-  chainId: 31337 | 84532;
+  chainId: 31337 | 84532 | 11155111;
   factory: `0x${string}`;
   vaultFactory?: `0x${string}`;
   recoveryEscrow?: `0x${string}`;
   lens?: `0x${string}`;
+  directFactory?: `0x${string}`;
+  directLens?: `0x${string}`;
   startBlock: number;
   oracleMode: "simulated";
   faucet: `0x${string}`;

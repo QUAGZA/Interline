@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ChainsResponse,
   DecimalString,
+  DirectFacilitiesResponse,
   EventsResponse,
   LagResponse,
   MarketsResponse,
@@ -24,6 +25,9 @@ describe("api-types zod", () => {
     expect(EventsResponse.parse({ events: [], nextCursor: null }).events).toEqual([]);
     expect(LagResponse.parse({ ok: true, chains: [] }).ok).toBe(true);
     expect(
+      DirectFacilitiesResponse.parse({ facilities: [], nextCursor: null, limit: 25 }).limit,
+    ).toBe(25);
+    expect(
       PortfolioResponse.parse({
         chainId: 31337,
         address: "0x0000000000000000000000000000000000000001",
@@ -39,6 +43,13 @@ describe("api-types zod", () => {
           indexedAt: "1970-01-01T00:00:00.000Z",
           oracleStatus: "UNAVAILABLE",
           oracleMode: "simulated",
+          hydratedBlockNumber: "0",
+          hydratedBlockHash: null,
+          hydratedBlockTimestamp: "0",
+          lastHydratedAt: null,
+          lastPolledAt: "1970-01-01T00:00:00.000Z",
+          lastError: null,
+          hydrationOk: false,
         },
       }).chainId,
     ).toBe(31337);

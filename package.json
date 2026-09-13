@@ -12,9 +12,11 @@
     "dev:frontend": "npm run dev -w frontend",
     "dev:api": "npm run start -w interline-indexer",
     "export:abis": "node --experimental-strip-types tools/export-abis.ts",
+    "replay:anvil": "node --experimental-strip-types tools/replay-anvil-broadcast.ts",
     "keeper": "npm run start -w @interline/keeper",
     "test:e2e": "npm run test:e2e -w frontend",
-    "test:api": "npm run test -w interline-indexer"
+    "test:api": "npm run test -w interline-indexer",
+    "test:v2": "forge test --via-ir --optimizer-runs 1"
   },
   "engines": {
     "node": ">=24"

@@ -10,5 +10,5 @@ interface IMarketRecoveryEscrow {
         uint256 debtWritten
     ) external;
 
-    function notifyRecovery(address market, address owner, uint256 assets) external;
+    function notifyRecovery(address market, address owner, uint256 assets) external returns (uint256 taken);
 }

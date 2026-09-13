@@ -10,4 +10,5 @@ interface IRestrictedVault {
 interface IBorrowerVaultFactory {
     function vaultOf(address market, address owner) external view returns (address);
     function createVault(address market, address owner) external returns (address);
+    function deployDirectVault(address owner, address controller, address loanToken) external returns (address);
 }

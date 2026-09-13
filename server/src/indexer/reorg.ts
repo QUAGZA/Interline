@@ -1,6 +1,6 @@
 import type { Hex } from "../domain.js";
 import type { IndexerStore } from "../db/store.js";
-import { derivedFromRecords, replayEvents } from "./apply.js";
+import { derivedFromRecords, flattenDerived, replayEvents } from "./apply.js";
 import type { ChainConfig } from "../domain.js";
 import { emptyMarket } from "../db/memory.js";
 
@@ -18,11 +18,7 @@ export async function rebuildDerived(store: IndexerStore, config: ChainConfig): 
   const seeded = config.markets.map((m) => emptyMarket(config, m));
   const base = derivedFromRecords(seeded, [], []);
   const next = replayEvents(base, events);
-  const flat = {
-    markets: [...next.markets.values()],
-    positions: [...next.positions.values()],
-    vaults: [...next.vaults.values()],
-  };
+  const flat = flattenDerived(next);
   await store.replaceChainDerived(config.chainId, flat);
 }
 

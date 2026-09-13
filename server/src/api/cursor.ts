@@ -7,10 +7,26 @@ export type PositionCursor = {
   owner: string;
 };
 
+export type FacilityCursor = {
+  chainId: number;
+  facility: string;
+};
+
 export type EventCursor = {
   blockNumber: string;
   logIndex: number;
 };
+
+export function decodeFacilityCursor(raw: string | undefined): FacilityCursor | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as FacilityCursor;
+    if (!parsed.facility || typeof parsed.chainId !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 export function encodeCursor(value: object): string {
   return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");

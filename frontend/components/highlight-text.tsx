@@ -3,6 +3,7 @@
 import { useRef, useEffect, type ReactNode } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -16,9 +17,10 @@ export function HighlightText({ children, className = "", parallaxSpeed = 0.3 }:
   const containerRef = useRef<HTMLSpanElement>(null);
   const highlightRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
+  const reduced = usePrefersReducedMotion();
 
   useEffect(() => {
-    if (!containerRef.current || !highlightRef.current || !textRef.current) return;
+    if (reduced || !containerRef.current || !highlightRef.current || !textRef.current) return;
 
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({
@@ -68,7 +70,7 @@ export function HighlightText({ children, className = "", parallaxSpeed = 0.3 }:
     }, containerRef);
 
     return () => ctx.revert();
-  }, [parallaxSpeed]);
+  }, [parallaxSpeed, reduced]);
 
   return (
     <span ref={containerRef} className={`relative inline-block ${className}`}>

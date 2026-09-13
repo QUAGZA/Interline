@@ -130,7 +130,7 @@ export function Board() {
         <div className="border-b border-border/50 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
           Last 15 events
         </div>
-        <ul className="max-h-64 overflow-auto text-sm">
+        <ul tabIndex={0} aria-label="Last 15 events" className="max-h-64 overflow-auto text-sm">
           {events.length === 0 ? (
             <li className="px-4 py-3 font-mono text-xs text-muted-foreground">No events yet.</li>
           ) : (

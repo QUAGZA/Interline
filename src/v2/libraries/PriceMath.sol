@@ -9,8 +9,8 @@ library PriceMath {
     uint256 internal constant BPS = 10_000;
     uint256 internal constant WAD = 1e18;
     uint256 internal constant PRICE_SCALE = 1e36;
-    uint16 internal constant DEFAULT_LTV_BPS = 7000;
-    uint16 internal constant DEFAULT_LT_BPS = 8000;
+    uint16 internal constant DEFAULT_LTV_BPS = 8000;
+    uint16 internal constant DEFAULT_LT_BPS = 9000;
     uint16 internal constant DEFAULT_BONUS_BPS = 500;
 
     enum HealthCode {

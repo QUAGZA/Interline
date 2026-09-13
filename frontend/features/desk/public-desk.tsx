@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { OracleBanner, PageHeader, SourceBanner } from "@/components/ui/chrome";
 import { HealthDisplay, TokenAmount } from "@/features/risk/health-display";
-import { usePositionsQuery } from "@/hooks/useV2Api";
-import { parseRouteChainId } from "@/lib/chains";
+import { usePositionsQuery, useDirectFacilitiesQuery } from "@/hooks/useV2Api";
+import { V2_CHAINS, parseRouteChainId } from "@/lib/chains";
 import { defaultV2ChainId, PAGE_SIZE } from "@/lib/config";
 import { useAppPrefs } from "@/features/settings/prefs";
 import { shortAddr } from "@/lib/format";
@@ -20,6 +20,8 @@ export function PublicDesk() {
   const mode = (search.get("mode") ?? "") as DeliveryMode | "";
   const cursor = search.get("cursor") ?? undefined;
 
+  const product = search.get("product") === "direct" ? "direct" : "pool";
+
   const q = usePositionsQuery({
     chainId,
     marketId: marketId || undefined,
@@ -31,13 +33,18 @@ export function PublicDesk() {
   const page = q.data?.data;
   const rows = page?.items ?? [];
 
-  function push(next: Record<string, string | undefined>) {
+  function hrefFor(next: Record<string, string | undefined>) {
     const sp = new URLSearchParams(search.toString());
     for (const [k, v] of Object.entries(next)) {
       if (!v) sp.delete(k);
       else sp.set(k, v);
     }
-    router.push(`/desk?${sp.toString()}`);
+    const q = sp.toString();
+    return q ? `/desk?${q}` : "/desk";
+  }
+
+  function push(next: Record<string, string | undefined>) {
+    router.push(hrefFor(next));
   }
 
   return (
@@ -45,10 +52,24 @@ export function PublicDesk() {
       <PageHeader
         kicker="02 / Desk"
         title="PUBLIC DESK"
-        description="Active loans, keyed by chain, market, and owner. Sorted by current debt. Wallet not required."
+        description="Active loans, keyed by chain, market, and owner. Direct agreements are listed separately and never share pool cash."
         actions={<OracleBanner />}
       />
-      <SourceBanner usingStub={q.data?.usingStub} />
+      <SourceBanner usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />
+      <div className="mt-6 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-widest">
+        <Link
+          href={hrefFor({ product: undefined })}
+          className={`border px-3 py-2 ${product === "pool" ? "border-accent text-accent" : "border-border"}`}
+        >
+          Pool loans
+        </Link>
+        <Link
+          href={hrefFor({ product: "direct", cursor: undefined })}
+          className={`border px-3 py-2 ${product === "direct" ? "border-accent text-accent" : "border-border"}`}
+        >
+          Direct agreements
+        </Link>
+      </div>
       <div className="mt-6 flex flex-wrap gap-3">
         <label className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           Chain
@@ -57,8 +78,11 @@ export function PublicDesk() {
             value={chainId}
             onChange={(e) => push({ chainId: e.target.value, cursor: undefined })}
           >
-            <option value="31337">Anvil</option>
-            <option value="84532">Base Sepolia</option>
+            {V2_CHAINS.map((c) => (
+              <option key={c.chainId} value={c.chainId}>
+                {c.name}
+              </option>
+            ))}
           </select>
         </label>
         <label className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -84,6 +108,10 @@ export function PublicDesk() {
         </label>
       </div>
 
+      {product === "direct" ? (
+        <DirectAgreementsDesk chainId={chainId} />
+      ) : (
+        <>
       <div className="mt-6 hidden md:block overflow-x-auto border border-border/50">
         <table className="w-full text-left">
           <thead className="border-b border-border/50 bg-card">
@@ -167,6 +195,50 @@ export function PublicDesk() {
           ) : null}
         </div>
       </div>
+        </>
+      )}
     </section>
+  );
+}
+
+function DirectAgreementsDesk({ chainId }: { chainId: number }) {
+  const q = useDirectFacilitiesQuery({ chainId });
+  const rows = q.data?.data ?? [];
+  return (
+    <div className="mt-6 overflow-x-auto border border-border/50">
+      <table className="w-full text-left">
+        <thead className="border-b border-border/50 bg-card">
+          <tr className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <th className="px-3 py-3">Lender</th>
+            <th className="px-3 py-3">Borrower</th>
+            <th className="px-3 py-3">Limit</th>
+            <th className="px-3 py-3">Outstanding</th>
+            <th className="px-3 py-3">HF</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.facility} className="border-b border-border/30">
+              <td className="px-3 py-3 font-mono text-xs">
+                <Link href={`/direct/${row.chainId}/${row.facility}`} className="hover:text-accent">
+                  {shortAddr(row.lender)}
+                </Link>
+              </td>
+              <td className="px-3 py-3 font-mono text-xs">{shortAddr(row.borrower)}</td>
+              <td className="px-3 py-3">
+                <TokenAmount raw={row.creditLimitRaw} decimals={6} symbol="mUSDC" />
+              </td>
+              <td className="px-3 py-3">
+                <TokenAmount raw={row.debtRaw} decimals={6} symbol="mUSDC" />
+              </td>
+              <td className="px-3 py-3 font-mono text-[11px] text-muted-foreground">Not applicable</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {rows.length === 0 ? (
+        <p className="p-4 font-mono text-sm text-muted-foreground">No direct agreements indexed on this chain yet.</p>
+      ) : null}
+    </div>
   );
 }

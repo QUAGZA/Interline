@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -50,9 +51,10 @@ export function WorkSection() {
   const sectionRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const reduced = usePrefersReducedMotion();
 
   useEffect(() => {
-    if (!sectionRef.current || !headerRef.current || !gridRef.current) return;
+    if (reduced || !sectionRef.current || !headerRef.current || !gridRef.current) return;
 
     const ctx = gsap.context(() => {
       gsap.fromTo(
@@ -90,7 +92,7 @@ export function WorkSection() {
     }, sectionRef);
 
     return () => ctx.revert();
-  }, []);
+  }, [reduced]);
 
   return (
     <section ref={sectionRef} id="line" className="relative py-32 pl-6 md:pl-28 pr-6 md:pr-12">
@@ -133,9 +135,10 @@ function WorkCard({
   const [isHovered, setIsHovered] = useState(false);
   const cardRef = useRef<HTMLElement>(null);
   const [isScrollActive, setIsScrollActive] = useState(false);
+  const reduced = usePrefersReducedMotion();
 
   useEffect(() => {
-    if (!persistHover || !cardRef.current) return;
+    if (reduced || !persistHover || !cardRef.current) return;
 
     const ctx = gsap.context(() => {
       ScrollTrigger.create({
@@ -146,7 +149,7 @@ function WorkCard({
     }, cardRef);
 
     return () => ctx.revert();
-  }, [persistHover]);
+  }, [persistHover, reduced]);
 
   const isActive = isHovered || isScrollActive;
 

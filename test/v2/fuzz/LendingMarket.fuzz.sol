@@ -3,6 +3,9 @@ pragma solidity ^0.8.24;
 
 import {MarketFixture} from "../fixtures/MarketFixture.sol";
 import {LendingMarket} from "../../../src/v2/LendingMarket.sol";
+import {LiquidationMath} from "../../../src/v2/libraries/LiquidationMath.sol";
+import {PriceMath} from "../../../src/v2/libraries/PriceMath.sol";
+import {IMarketOracle} from "../../../src/v2/interfaces/IMarketOracle.sol";
 
 contract LendingMarketFuzzTest is MarketFixture {
     function setUp() public {
@@ -105,5 +108,39 @@ contract LendingMarketFuzzTest is MarketFixture {
         vm.prank(bob);
         vm.expectRevert(LendingMarket.DustDebt.selector);
         market.repay(bob, repayAmt);
+    }
+
+    function testFuzz_LiquidationBothModesBounded(uint128 priceRaw, bool exactDebt) public {
+        uint256 maxB = market.maxBorrow(bob);
+        if (maxB < MIN_BORROW) return;
+        _borrow(bob, bound(maxB / 2, MIN_BORROW, maxB));
+        uint256 price = bound(uint256(priceRaw), 100e8, 1_900e8);
+        wethFeed.setAnswer(int256(uint256(price)));
+        (,,,,, bool liquidatable) = market.healthOf(bob);
+        if (!liquidatable) return;
+        _fund(carol, 1_000_000e6, 0);
+        uint256 shares = market.debtSharesOf(bob);
+        uint256 col = market.collateralOf(bob);
+        uint256 beforeLoan = musdc.balanceOf(carol);
+        vm.prank(carol);
+        if (exactDebt) {
+            market.liquidate(bob, shares, 0, type(uint256).max, 0);
+        } else {
+            market.liquidate(bob, 0, col, type(uint256).max, 0);
+        }
+        uint256 paid = beforeLoan - musdc.balanceOf(carol);
+        uint256 seized = mweth.balanceOf(carol);
+        IMarketOracle.Quote memory oq = oracle.quote();
+        bool capped = market.debtSharesOf(bob) == 0 && !market.defaulted(bob);
+        uint256 seizedValue = PriceMath.collateralValueLoan(seized, oq.quoteScale36);
+        assertLe(seizedValue, LiquidationMath.maxSeizedValueLoan(paid, oq.quoteScale36, 500, capped));
+        if (capped) {
+            uint256 residual = market.collateralOf(bob);
+            if (residual > 0) {
+                vm.prank(bob);
+                market.removeCollateral(residual);
+                assertEq(market.collateralOf(bob), 0);
+            }
+        }
     }
 }

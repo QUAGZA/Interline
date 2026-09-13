@@ -25,4 +25,8 @@ export const qk = {
     ["v2", "portfolio", chainId, address.toLowerCase()] as const,
   events: (chainId?: number, address?: string) =>
     ["v2", "events", chainId ?? "all", address?.toLowerCase() ?? "all"] as const,
+  directFacilities: (chainId?: number, party?: string, role?: string) =>
+    ["v2", "direct", chainId ?? "all", party?.toLowerCase() ?? "all", role ?? "either"] as const,
+  directFacility: (chainId: number, facility: string) =>
+    ["v2", "direct-one", chainId, facility.toLowerCase()] as const,
 };

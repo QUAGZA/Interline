@@ -84,8 +84,9 @@ contract RestrictedMarketTest is RestrictedFixture {
         _fundRestricted(bob, 0, 1 ether);
         vm.prank(bob);
         restricted.addCollateral(bob, 1 ether);
+        address vaultAddr = vaultFactory.vaultOf(address(restricted), bob);
         vm.prank(bob);
-        BorrowerVaultV2(vaultFactory.vaultOf(address(restricted), bob)).repay(100e6);
+        BorrowerVaultV2(vaultAddr).repay(100e6);
         assertLt(restricted.positionDebt(bob), 1_000e6);
     }
 

@@ -2,36 +2,26 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
 import { useAccount, useConnect, useDisconnect, useEnsName, useSwitchChain } from "wagmi";
-import { V2_CHAINS, chainName, parseRouteChainId, type V2ChainId } from "@/lib/chains";
+import { V2_CHAINS, chainName, parseRouteChainId, viewingChainFromPath, type V2ChainId } from "@/lib/chains";
 import { defaultV2ChainId } from "@/lib/config";
+import { useAppPrefs } from "@/features/settings/prefs";
 import { shortAddr } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/markets", label: "Markets", match: (p: string) => p.startsWith("/markets") },
+  { href: "/direct", label: "Direct lending", match: (p: string) => p.startsWith("/direct") },
   { href: "/desk", label: "Public desk", match: (p: string) => p === "/desk" || p.startsWith("/positions") },
   { href: "/dashboard", label: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
 ];
-
-function viewingChainFromPath(pathname: string, search: URLSearchParams, fallback: V2ChainId): V2ChainId {
-  const parts = pathname.split("/").filter(Boolean);
-  if (
-    (parts[0] === "markets" || parts[0] === "positions" || parts[0] === "accounts") &&
-    parts[1]
-  ) {
-    return parseRouteChainId(parts[1]) ?? fallback;
-  }
-  return parseRouteChainId(search.get("chainId") ?? undefined) ?? fallback;
-}
 
 export function AppHeader() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const viewing = viewingChainFromPath(pathname, searchParams, defaultV2ChainId);
+  const { prefs, update } = useAppPrefs();
+  const viewing = viewingChainFromPath(pathname, searchParams, prefs.defaultChainId ?? defaultV2ChainId);
 
   const { address, isConnected, chainId: walletChainId } = useAccount();
   const { connect, connectors, isPending } = useConnect();
@@ -42,7 +32,18 @@ export function AppHeader() {
   const walletMismatch = isConnected && walletChainId !== viewing;
 
   function setViewChain(id: V2ChainId) {
+    update({ defaultChainId: id });
     const parts = pathname.split("/").filter(Boolean);
+    if (parts[0] === "direct") {
+      if (parts[1] === "legacy" && parts[2] && parseRouteChainId(parts[2])) {
+        router.push(["", "direct", "legacy", String(id), ...parts.slice(3)].join("/"));
+        return;
+      }
+      if (parts[1] && parseRouteChainId(parts[1])) {
+        router.push(["", "direct", String(id), ...parts.slice(2)].join("/"));
+        return;
+      }
+    }
     if (
       (parts[0] === "markets" || parts[0] === "positions" || parts[0] === "accounts") &&
       parts[1] &&
@@ -78,15 +79,62 @@ export function AppHeader() {
             </Link>
           ))}
         </nav>
-        <button
-          type="button"
-          className="md:hidden ml-auto border border-border px-3 py-1 font-mono text-[10px] uppercase tracking-widest"
-          aria-expanded={open}
-          aria-controls="mobile-menu"
-          onClick={() => setOpen((v) => !v)}
-        >
-          Menu
-        </button>
+        <details className="md:hidden ml-auto">
+          <summary
+            id="mobile-nav-toggle"
+            className="cursor-pointer list-none border border-border px-3 py-1 font-mono text-[10px] uppercase tracking-widest [&::-webkit-details-marker]:hidden"
+          >
+            Menu
+          </summary>
+          <div
+            id="mobile-menu"
+            className="fixed left-0 right-0 top-14 z-50 space-y-3 border-t border-border/40 bg-background px-4 py-3"
+          >
+            {NAV.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="block font-mono text-xs uppercase tracking-widest text-foreground"
+              >
+                {item.label}
+              </Link>
+            ))}
+            <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Network
+              <select
+                className="border border-border bg-background px-2 py-1 text-foreground"
+                value={viewing}
+                onChange={(e) => setViewChain(Number(e.target.value) as V2ChainId)}
+              >
+                {V2_CHAINS.map((c) => (
+                  <option key={c.chainId} value={c.chainId}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {isConnected ? (
+              <div className="space-y-2">
+                <p className="font-mono text-xs">{ens ?? shortAddr(address)}</p>
+                <button type="button" onClick={() => disconnect()} className="font-mono text-[10px] uppercase tracking-widest">
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              connectors.map((c) => (
+                <button
+                  key={c.uid}
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => connect({ connector: c })}
+                  className="block w-full border border-accent bg-accent px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-accent-foreground"
+                >
+                  Connect {c.name}
+                </button>
+              ))
+            )}
+          </div>
+        </details>
         <div className="ml-auto hidden md:flex items-center gap-3">
           <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
             Network
@@ -144,54 +192,6 @@ export function AppHeader() {
           )}
         </div>
       </div>
-      {open ? (
-        <div id="mobile-menu" className="md:hidden border-t border-border/40 px-4 py-3 space-y-3">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="block font-mono text-xs uppercase tracking-widest text-foreground"
-            >
-              {item.label}
-            </Link>
-          ))}
-          <label className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            Network
-            <select
-              className="border border-border bg-background px-2 py-1 text-foreground"
-              value={viewing}
-              onChange={(e) => setViewChain(Number(e.target.value) as V2ChainId)}
-            >
-              {V2_CHAINS.map((c) => (
-                <option key={c.chainId} value={c.chainId}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {isConnected ? (
-            <div className="space-y-2">
-              <p className="font-mono text-xs">{ens ?? shortAddr(address)}</p>
-              <button type="button" onClick={() => disconnect()} className="font-mono text-[10px] uppercase tracking-widest">
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            connectors.map((c) => (
-              <button
-                key={c.uid}
-                type="button"
-                disabled={isPending}
-                onClick={() => connect({ connector: c })}
-                className="block w-full border border-accent bg-accent px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-accent-foreground"
-              >
-                Connect {c.name}
-              </button>
-            ))
-          )}
-        </div>
-      ) : null}
     </header>
   );
 }

@@ -53,12 +53,38 @@ export const escrowEvents = parseAbi([
   "event Claimed(uint256 indexed episodeId, address indexed supplier, uint256 assets)",
 ]);
 
+export const directFactoryEvents = parseAbi([
+  "event FacilityCreated(address indexed facility, address indexed lender, address indexed borrower, address vault, bytes32 termsHash, address creator)",
+]);
+
+export const directFacilityEvents = parseAbi([
+  "event TermsAccepted(address indexed party, bytes32 indexed termsHash)",
+  "event RequestDeclined(address indexed party)",
+  "event RequestCancelled(address indexed party)",
+  "event Activated(uint64 activatedAt, uint64 borrowExpiry, uint64 repaymentDueAt)",
+  "event Funded(address indexed lender, uint256 assets, uint256 cashAfter)",
+  "event CashWithdrawn(address indexed lender, uint256 assets, uint256 cashAfter)",
+  "event Borrowed(address indexed borrower, uint256 assets, uint256 shares, uint256 debtAfter)",
+  "event Repaid(address indexed borrower, address indexed payer, uint256 assets, uint256 sharesBurned, uint256 principalPaid, uint256 interestPaid, uint256 roundingSurplus)",
+  "event BorrowingPaused()",
+  "event BorrowingResumed()",
+  "event RecallRequested(bytes32 indexed reasonHash, uint64 deadline, uint8 reasonCode)",
+  "event RecallCleared()",
+  "event CapProposed(bytes32 indexed digest, address indexed proposer, uint256 nonce, uint64 validUntil)",
+  "event CapApproved(bytes32 indexed digest, address indexed party)",
+  "event CapCancelled(bytes32 indexed digest, address indexed party)",
+  "event CapExecuted(uint256 newCap, uint256 nonce)",
+  "event AgreementEnded()",
+]);
+
 export const allEventAbis = [
   ...factoryEvents,
   ...vaultFactoryEvents,
   ...marketEvents,
   ...vaultEvents,
   ...escrowEvents,
+  ...directFactoryEvents,
+  ...directFacilityEvents,
 ] as const;
 
 export const marketViews = parseAbi([
@@ -92,6 +118,37 @@ export const marketViews = parseAbi([
   "function principalOutstanding(address) view returns (uint256)",
   "function defaulted(address) view returns (bool)",
   "function writtenOffLiability(address) view returns (uint256)",
+]);
+
+export const facilityViews = parseAbi([
+  "function loanToken() view returns (address)",
+  "function lender() view returns (address)",
+  "function borrower() view returns (address)",
+  "function vault() view returns (address)",
+  "function termsHash() view returns (bytes32)",
+  "function creditLimit() view returns (uint256)",
+  "function accountedCash() view returns (uint256)",
+  "function debtShares() view returns (uint256)",
+  "function principalOutstanding() view returns (uint256)",
+  "function currentDebt() view returns (uint256)",
+  "function aprRay() view returns (uint256)",
+  "function acceptanceDeadline() view returns (uint64)",
+  "function activatedAt() view returns (uint64)",
+  "function borrowExpiry() view returns (uint64)",
+  "function repaymentDueAt() view returns (uint64)",
+  "function lenderAccepted() view returns (bool)",
+  "function borrowerAccepted() view returns (bool)",
+  "function declined() view returns (bool)",
+  "function cancelled() view returns (bool)",
+  "function ended() view returns (bool)",
+  "function borrowingPaused() view returns (bool)",
+  "function recallActive() view returns (bool)",
+  "function recallDeadline() view returns (uint64)",
+  "function venue() view returns (address)",
+  "function swapRouter() view returns (address)",
+  "function otherToken() view returns (address)",
+  "function borrowPeriod() view returns (uint32)",
+  "function recallWindow() view returns (uint32)",
 ]);
 
 export const erc20Views = parseAbi([

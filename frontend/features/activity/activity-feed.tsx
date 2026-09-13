@@ -7,11 +7,12 @@ import { useEventsQuery } from "@/hooks/useV2Api";
 import { useOptionalTxMachine } from "@/features/transactions/tx-store";
 import { TxStatusList } from "@/features/transactions/tx-status";
 import { shortAddr } from "@/lib/format";
-import { defaultV2ChainId } from "@/lib/config";
+import { useCatalogChainId } from "@/lib/use-catalog-chain";
 
 export function ActivityFeed() {
   const { address } = useAccount();
-  const events = useEventsQuery(defaultV2ChainId, address);
+  const chainId = useCatalogChainId();
+  const events = useEventsQuery(chainId, address);
   const tx = useOptionalTxMachine();
   const items = events.data?.data.items ?? [];
 
@@ -22,13 +23,15 @@ export function ActivityFeed() {
         title="ACTIVITY"
         description="Indexed market events plus in-session transaction status. Session rows are keyed per operation."
       />
-      <SourceBanner usingStub={events.data?.usingStub} />
+      <SourceBanner usingStub={events.data?.usingStub} stale={events.data?.stale} source={events.data?.source} />
       {tx && tx.records.length > 0 ? <TxStatusList records={tx.records} /> : null}
       <ul className="space-y-3">
         {items.map((e) => (
           <li key={`${e.txHash}-${e.logIndex}`} className="border border-border/50 bg-card p-4">
             <div className="flex justify-between gap-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              <span>{e.name}</span>
+              <span>
+                {e.product === "DIRECT" ? "Direct" : "Pool"} · {e.name}
+              </span>
               <span>block {e.blockNumber}</span>
             </div>
             <p className="mt-2 font-mono text-sm">{e.detail}</p>

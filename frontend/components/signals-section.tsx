@@ -137,6 +137,8 @@ export function SignalsSection() {
           scrollRef.current = el;
           cardsRef.current = el;
         }}
+        tabIndex={0}
+        aria-label="Public market tape"
         className="flex gap-8 overflow-x-auto pb-8 pr-12 scrollbar-hide"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >

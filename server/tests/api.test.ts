@@ -3,7 +3,7 @@ import { BASE_APR_RAY, RAY } from "@interline/math";
 import { MarketsResponse, Position, PositionsResponse, POSITIONS_PAGE_SIZE } from "@interline/api-types";
 import { createApp } from "../src/api/app.js";
 import { MemoryStore } from "../src/db/memory.js";
-import type { ChainConfig, MarketRecord, PositionRecord } from "../src/domain.js";
+import { cursorHydrationDefaults, type ChainConfig, type MarketRecord, type PositionRecord } from "../src/domain.js";
 
 const MARKET = "0x00000000000000000000000000000000000000a1";
 const OWNER = "0x00000000000000000000000000000000000000b1";
@@ -19,6 +19,8 @@ const config: ChainConfig = {
   startBlock: 1n,
   oracleMode: "simulated",
   faucet: null,
+  directFactory: null,
+  directLens: null,
   markets: [
     {
       id: "usdc-weth-wallet",
@@ -54,8 +56,8 @@ function marketRow(): MarketRecord {
     epochAprRay: BASE_APR_RAY,
     supplyCap: 1_000_000_000000n,
     borrowCap: 800_000_000000n,
-    maxLtvBps: 7000,
-    liquidationThresholdBps: 8000,
+    maxLtvBps: 8000,
+    liquidationThresholdBps: 9000,
     liquidationBonusBps: 500,
     defaultPositionCap: 800_000_000000n,
     supplyFrozen: false,
@@ -77,6 +79,7 @@ async function seededStore() {
   const store = new MemoryStore();
   await store.seedMarkets(config);
   await store.upsertMarket(marketRow());
+  const now = new Date().toISOString();
   await store.upsertCursor({
     chainId: 31337,
     startBlock: 1n,
@@ -85,7 +88,14 @@ async function seededStore() {
     lastTimestamp: 1_700_000_010n,
     headBlock: 45n,
     lastError: null,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
+    ...cursorHydrationDefaults({ updatedAt: now }),
+    hydratedBlockNumber: 42n,
+    hydratedBlockHash: `0x${"42".repeat(32)}`,
+    hydratedBlockTimestamp: 1_700_000_010n,
+    lastHydratedAt: now,
+    lastPolledAt: now,
+    hydrationOk: true,
   });
   const position: PositionRecord = {
     chainId: 31337,
@@ -200,5 +210,64 @@ describe("GET /v1 API", () => {
     );
     expect(second.positions.length).toBeGreaterThan(0);
     expect(second.positions[0]!.owner).not.toBe(first.positions[0]!.owner);
+  });
+
+  it("lists direct facilities and keeps them out of pool portfolio HF", async () => {
+    const store = await seededStore();
+    const FACILITY = "0x00000000000000000000000000000000000000d1";
+    await store.upsertDirectFacility({
+      chainId: 31337,
+      facility: FACILITY,
+      lender: OWNER,
+      borrower: "0x00000000000000000000000000000000000000d3",
+      vault: "0x00000000000000000000000000000000000000d4",
+      asset: "0x00000000000000000000000000000000000000c1",
+      termsHash: `0x${"11".repeat(32)}`,
+      lenderAccepted: true,
+      borrowerAccepted: true,
+      declined: false,
+      cancelled: false,
+      ended: false,
+      acceptanceDeadline: 1n,
+      activatedAt: 2n,
+      borrowExpiry: 3n,
+      repaymentDueAt: 3n,
+      creditLimit: 5_000_000000n,
+      accountedCash: 2_000_000000n,
+      debtShares: 0n,
+      principal: 0n,
+      lastDebt: 0n,
+      aprRay: 5n * 10n ** 25n,
+      recallDeadline: 0n,
+      recallActive: false,
+      borrowingPaused: false,
+      venue: "0x0000000000000000000000000000000000000000",
+      swapRouter: "0x0000000000000000000000000000000000000000",
+      otherToken: "0x0000000000000000000000000000000000000000",
+      borrowPeriod: 365n * 24n * 3600n,
+      recallWindow: 300n,
+    });
+    const app = createApp({ store, configs: [config] });
+    const list = await app.request("/v1/direct-facilities?chainId=31337");
+    expect(list.status).toBe(200);
+    const body = await list.json();
+    expect(body.facilities).toHaveLength(1);
+    expect(body.facilities[0].product).toBe("DIRECT");
+    expect(body.facilities[0].collateralization).toBe("OVERCOLLATERALIZED_80");
+    expect(body.facilities[0].healthFactorWad).toBeNull();
+
+    const one = await app.request(`/v1/direct-facilities/31337/${FACILITY}`);
+    expect(one.status).toBe(200);
+
+    const portfolio = await app.request(`/v1/accounts/31337/${OWNER}/portfolio`);
+    const port = await portfolio.json();
+    expect(port.directLending).toHaveLength(1);
+    expect(port.directBorrowing).toHaveLength(0);
+    expect(port.borrows).toHaveLength(1);
+
+    const history = await app.request(`/v1/direct-facilities/31337/${FACILITY}/history`);
+    expect(history.status).toBe(200);
+    const hist = await history.json();
+    expect(hist.history).toEqual([]);
   });
 });

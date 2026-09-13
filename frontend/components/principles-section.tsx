@@ -4,6 +4,7 @@ import { useRef, useEffect } from "react";
 import { HighlightText } from "@/components/highlight-text";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -54,9 +55,10 @@ export function PrinciplesSection() {
   const sectionRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const principlesRef = useRef<HTMLDivElement>(null);
+  const reduced = usePrefersReducedMotion();
 
   useEffect(() => {
-    if (!sectionRef.current || !headerRef.current || !principlesRef.current) return;
+    if (reduced || !sectionRef.current || !headerRef.current || !principlesRef.current) return;
 
     const ctx = gsap.context(() => {
       gsap.from(headerRef.current, {
@@ -89,7 +91,7 @@ export function PrinciplesSection() {
     }, sectionRef);
 
     return () => ctx.revert();
-  }, []);
+  }, [reduced]);
 
   return (
     <section ref={sectionRef} id="principles" className="relative py-32 pl-6 md:pl-28 pr-6 md:pr-12">

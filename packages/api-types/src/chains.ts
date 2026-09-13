@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { ChainId, DecimalString, HexAddress, OracleMode } from "./primitives.js";
-import { Freshness } from "./freshness.js";
+import { ChainId, DecimalString, HexAddress, OracleMode } from "./primitives";
+import { Freshness } from "./freshness";
 
 export const ChainSummary = z.object({
   chainId: ChainId,

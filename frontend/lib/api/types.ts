@@ -28,6 +28,7 @@ export type FreshnessDto = {
   blockNumber: DecString;
   blockHash: AddressString | `0x${string}` | null;
   indexedAt: string;
+  indexedBlockTimestamp: DecString;
   lagSeconds: number;
 };
 
@@ -52,6 +53,8 @@ export type MarketSummaryDto = {
   borrowed: AmountDto;
   liquidity: AmountDto;
   utilizationRay: DecString;
+  epochIndexRay: DecString;
+  epochTimestamp: DecString;
   status: MarketStatus;
   oracleMode: OracleMode;
   oracleStatus: OracleStatus;
@@ -83,6 +86,7 @@ export type PositionDto = {
   marketLabel: string;
   deliveryMode: DeliveryMode;
   debt: AmountDto;
+  debtShares: DecString;
   principal: AmountDto;
   collateral: AmountDto;
   collateralValueLoan: AmountDto;
@@ -137,6 +141,9 @@ export type PortfolioDto = {
   lowestHealthFactorWad: DecString | null;
   lowestHealthCode: HealthCode | "NONE";
   freshness: FreshnessDto;
+  directLending?: import("@/features/direct/dto").DirectFacilityDto[];
+  directBorrowing?: import("@/features/direct/dto").DirectFacilityDto[];
+  directRequests?: import("@/features/direct/dto").DirectFacilityDto[];
 };
 
 export type EventDto = {
@@ -148,6 +155,7 @@ export type EventDto = {
   name: string;
   detail: string;
   at: string;
+  product?: "POOL" | "DIRECT";
 };
 
 export type EventsPageDto = {
@@ -170,7 +178,11 @@ export type PositionsQuery = {
   limit?: number;
 };
 
+export type DataSource = "indexer" | "rpc" | "stub";
+
 export type Envelope<T> = {
   data: T;
   usingStub: boolean;
+  stale?: boolean;
+  source?: DataSource;
 };

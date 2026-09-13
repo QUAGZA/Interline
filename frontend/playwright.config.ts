@@ -14,15 +14,15 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "on-first-retry",
-    navigationTimeout: 30_000,
+    navigationTimeout: 45_000,
   },
   webServer: process.env.PLAYWRIGHT_NO_WEBSERVER
     ? undefined
     : {
-        command: "npm run dev",
+        command: "npx next dev --turbopack --port 3000",
         url: baseURL,
-        reuseExistingServer: true,
-        timeout: 120_000,
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
       },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

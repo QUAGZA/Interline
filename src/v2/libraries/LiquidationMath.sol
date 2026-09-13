@@ -7,9 +7,19 @@ import {ShareMath} from "./ShareMath.sol";
 
 /// @title LiquidationMath
 /// @notice 100% close factor. Exact debt shares XOR exact collateral. Matches `packages/math`.
+/// @dev Rounding (raw units). Collateral from repayment uses two ceils (`_collateralForRepay`):
+///      `valued = ceil(loanIn * (BPS + bonusBps) / BPS)` and
+///      `collateralOut = ceil(valued * PRICE_SCALE / scale36)`.
+///      Seized collateral value in loan raw units is therefore at most
+///      `valued + floor((scale36 - 1) / PRICE_SCALE)`.
+///      Exact-collateral quotes that do not hit the remaining-debt cap size repayment with
+///      `floor(value * BPS / (BPS + bonusBps))` and may sit 1 additional loan raw unit above
+///      that ceil-bonus amount. Uniform bound: `maxSeizedValueLoan`.
 library LiquidationMath {
     uint256 internal constant BPS = 10_000;
     uint256 internal constant PRICE_SCALE = 1e36;
+    /// @dev Extra loan raw unit allowed when exact-collateral uses the floor bonus inverse.
+    uint256 internal constant BONUS_INVERSE_SLACK_LOAN = 1;
 
     error InvalidQuoteMode();
     error ZeroQuote();
@@ -78,6 +88,19 @@ library LiquidationMath {
         return (q.loanAssetsIn, q.collateralOut);
     }
 
+    /// @notice Upper bound on seized collateral value, in loan-token raw units.
+    /// @dev `ceil(loanIn * (BPS + bonusBps) / BPS) + floor((scale36 - 1) / PRICE_SCALE)`
+    ///      plus `BONUS_INVERSE_SLACK_LOAN` (1) when `debtShareCapBound` is false.
+    function maxSeizedValueLoan(uint256 loanIn, uint256 scale36, uint16 bonusBps, bool debtShareCapBound)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 valued = Math.mulDiv(loanIn, BPS + uint256(bonusBps), BPS, Math.Rounding.Ceil);
+        uint256 priceCeilSlack = scale36 == 0 ? 0 : (scale36 - 1) / PRICE_SCALE;
+        return valued + priceCeilSlack + (debtShareCapBound ? 0 : BONUS_INVERSE_SLACK_LOAN);
+    }
+
     function _fromDebtShares(
         uint256 exactDebtShares,
         uint256 ownerDebtShares,
@@ -105,12 +128,20 @@ library LiquidationMath {
         uint256 scale36,
         uint16 bonusBps
     ) private pure returns (Quote memory q) {
-        uint256 collat = exactCollateral > ownerCollateral ? ownerCollateral : exactCollateral;
-        uint256 loanValue = PriceMath.collateralValueLoan(collat, scale36);
+        uint256 requested = exactCollateral > ownerCollateral ? ownerCollateral : exactCollateral;
+        uint256 loanValue = PriceMath.collateralValueLoan(requested, scale36);
         uint256 maxAssets = Math.mulDiv(loanValue, BPS, BPS + uint256(bonusBps));
         uint256 shares = ShareMath.repaySharesBurn(maxAssets, ownerDebtShares, indexRay);
         if (shares == 0) revert ZeroQuote();
         uint256 loanIn = ShareMath.repayAssetsPaid(shares, indexRay);
+        uint256 collat = requested;
+        // Remaining debt can cap burned shares below the budget implied by `requested`.
+        // Recompute collateral from actual repayment + bonus so the liquidator cannot
+        // keep the full request after paying only the leftover debt.
+        if (shares == ownerDebtShares) {
+            uint256 collatFromRepay = _collateralForRepay(loanIn, scale36, bonusBps);
+            if (collatFromRepay < collat) collat = collatFromRepay;
+        }
         q.debtSharesBurned = shares;
         q.loanAssetsIn = loanIn;
         q.collateralOut = collat;

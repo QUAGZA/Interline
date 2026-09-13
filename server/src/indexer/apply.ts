@@ -1,10 +1,32 @@
 import { BASE_APR_RAY, RAY } from "@interline/math";
-import { asAddress, type IndexedEventRecord, type MarketRecord, type PositionRecord, type VaultRecord } from "../domain.js";
+import {
+  asAddress,
+  type DirectAcceptanceRecord,
+  type DirectAuxiliary,
+  type DirectCapProposalRecord,
+  type DirectCashflowRecord,
+  type DirectFacilityRecord,
+  type DirectHistoryRecord,
+  type DirectRecallEpisodeRecord,
+  type DirectTermsRecord,
+  type IndexedEventRecord,
+  type MarketRecord,
+  type PositionRecord,
+  type VaultRecord,
+  ZERO_ADDRESS,
+} from "../domain.js";
 
 export type DerivedState = {
   markets: Map<string, MarketRecord>;
   positions: Map<string, PositionRecord>;
   vaults: Map<string, VaultRecord>;
+  facilities: Map<string, DirectFacilityRecord>;
+  terms: Map<string, DirectTermsRecord>;
+  acceptances: Map<string, DirectAcceptanceRecord>;
+  cashflows: Map<string, DirectCashflowRecord>;
+  caps: Map<string, DirectCapProposalRecord>;
+  recalls: Map<string, DirectRecallEpisodeRecord>;
+  history: Map<string, DirectHistoryRecord>;
 };
 
 function marketKey(m: MarketRecord): string {
@@ -60,11 +82,26 @@ function deliveryModeFrom(raw: string | undefined): "wallet" | "restricted" {
   return "wallet";
 }
 
+function cloneMap<T>(m: Map<string, T>): Map<string, T> {
+  return new Map([...m.entries()].map(([k, v]) => [k, { ...v }]));
+}
+
+export function emptyAuxiliary(): DirectAuxiliary {
+  return { terms: [], acceptances: [], cashflows: [], caps: [], recalls: [], history: [] };
+}
+
 export function cloneDerived(state: DerivedState): DerivedState {
   return {
-    markets: new Map([...state.markets.entries()].map(([k, v]) => [k, { ...v }])),
-    positions: new Map([...state.positions.entries()].map(([k, v]) => [k, { ...v }])),
-    vaults: new Map([...state.vaults.entries()].map(([k, v]) => [k, { ...v }])),
+    markets: cloneMap(state.markets),
+    positions: cloneMap(state.positions),
+    vaults: cloneMap(state.vaults),
+    facilities: cloneMap(state.facilities),
+    terms: cloneMap(state.terms),
+    acceptances: cloneMap(state.acceptances),
+    cashflows: cloneMap(state.cashflows),
+    caps: cloneMap(state.caps),
+    recalls: cloneMap(state.recalls),
+    history: cloneMap(state.history),
   };
 }
 
@@ -72,11 +109,39 @@ export function derivedFromRecords(
   markets: MarketRecord[],
   positions: PositionRecord[],
   vaults: VaultRecord[],
+  facilities: DirectFacilityRecord[] = [],
+  auxiliary: DirectAuxiliary = emptyAuxiliary(),
 ): DerivedState {
-  const state: DerivedState = { markets: new Map(), positions: new Map(), vaults: new Map() };
+  const state: DerivedState = {
+    markets: new Map(),
+    positions: new Map(),
+    vaults: new Map(),
+    facilities: new Map(),
+    terms: new Map(),
+    acceptances: new Map(),
+    cashflows: new Map(),
+    caps: new Map(),
+    recalls: new Map(),
+    history: new Map(),
+  };
   for (const m of markets) state.markets.set(marketKey(m), { ...m });
   for (const p of positions) state.positions.set(posKey(p.chainId, p.marketAddress, p.owner), { ...p });
   for (const v of vaults) state.vaults.set(`${v.chainId}:${v.vault.toLowerCase()}`, { ...v });
+  for (const f of facilities) state.facilities.set(`${f.chainId}:${f.facility.toLowerCase()}`, { ...f });
+  for (const t of auxiliary.terms) state.terms.set(`${t.chainId}:${t.facility.toLowerCase()}`, { ...t });
+  for (const a of auxiliary.acceptances) {
+    state.acceptances.set(`${a.chainId}:${a.facility.toLowerCase()}:${a.party.toLowerCase()}`, { ...a });
+  }
+  for (const c of auxiliary.cashflows) {
+    state.cashflows.set(`${c.chainId}:${c.txHash.toLowerCase()}:${c.logIndex}`, { ...c });
+  }
+  for (const cap of auxiliary.caps) {
+    state.caps.set(`${cap.chainId}:${cap.facility.toLowerCase()}:${cap.digest.toLowerCase()}`, { ...cap });
+  }
+  for (const r of auxiliary.recalls) state.recalls.set(`${r.chainId}:${r.facility.toLowerCase()}`, { ...r });
+  for (const h of auxiliary.history) {
+    state.history.set(`${h.chainId}:${h.txHash.toLowerCase()}:${h.logIndex}`, { ...h });
+  }
   return state;
 }
 
@@ -84,17 +149,317 @@ export function flattenDerived(state: DerivedState): {
   markets: MarketRecord[];
   positions: PositionRecord[];
   vaults: VaultRecord[];
+  facilities: DirectFacilityRecord[];
+  auxiliary: DirectAuxiliary;
 } {
   return {
     markets: [...state.markets.values()].map((m) => ({ ...m })),
     positions: [...state.positions.values()].map((p) => ({ ...p })),
     vaults: [...state.vaults.values()].map((v) => ({ ...v })),
+    facilities: [...state.facilities.values()].map((f) => ({ ...f })),
+    auxiliary: {
+      terms: [...state.terms.values()].map((t) => ({ ...t })),
+      acceptances: [...state.acceptances.values()].map((a) => ({ ...a })),
+      cashflows: [...state.cashflows.values()].map((c) => ({ ...c })),
+      caps: [...state.caps.values()].map((c) => ({ ...c })),
+      recalls: [...state.recalls.values()].map((r) => ({ ...r })),
+      history: [...state.history.values()].map((h) => ({ ...h })),
+    },
   };
+}
+
+export function termsFromFacility(row: DirectFacilityRecord): DirectTermsRecord {
+  return {
+    chainId: row.chainId,
+    facility: row.facility,
+    loanToken: row.asset,
+    creditLimit: row.creditLimit,
+    aprRay: row.aprRay,
+    acceptanceLifetime: 0n,
+    borrowPeriod: row.borrowPeriod,
+    recallWindow: row.recallWindow,
+    venue: row.venue,
+    swapRouter: row.swapRouter,
+    otherToken: row.otherToken,
+    termsHash: row.termsHash,
+  };
+}
+
+function findFacility(state: DerivedState, chainId: number, address: string): DirectFacilityRecord | undefined {
+  return state.facilities.get(`${chainId}:${address.toLowerCase()}`);
+}
+
+function emptyFacility(chainId: number, facility: DirectFacilityRecord["facility"]): DirectFacilityRecord {
+  return {
+    chainId,
+    facility,
+    lender: asAddress("0x0000000000000000000000000000000000000000"),
+    borrower: asAddress("0x0000000000000000000000000000000000000000"),
+    vault: asAddress("0x0000000000000000000000000000000000000000"),
+    asset: asAddress("0x0000000000000000000000000000000000000000"),
+    termsHash: "0x0000000000000000000000000000000000000000000000000000000000000000",
+    lenderAccepted: false,
+    borrowerAccepted: false,
+    declined: false,
+    cancelled: false,
+    ended: false,
+    acceptanceDeadline: 0n,
+    activatedAt: 0n,
+    borrowExpiry: 0n,
+    repaymentDueAt: 0n,
+    creditLimit: 0n,
+    accountedCash: 0n,
+    debtShares: 0n,
+    principal: 0n,
+    lastDebt: 0n,
+    aprRay: 0n,
+    recallDeadline: 0n,
+    recallActive: false,
+    borrowingPaused: false,
+    venue: ZERO_ADDRESS,
+    swapRouter: ZERO_ADDRESS,
+    otherToken: ZERO_ADDRESS,
+    borrowPeriod: 0n,
+    recallWindow: 0n,
+  };
+}
+
+function eventKey(event: IndexedEventRecord): string {
+  return `${event.chainId}:${event.txHash.toLowerCase()}:${event.logIndex}`;
+}
+
+function recordCashMutation(
+  state: DerivedState,
+  fac: DirectFacilityRecord,
+  event: IndexedEventRecord,
+  kind: string,
+  assets: bigint,
+): void {
+  const key = eventKey(event);
+  state.cashflows.set(key, {
+    chainId: event.chainId,
+    facility: fac.facility,
+    kind,
+    assets,
+    cashAfter: fac.accountedCash,
+    debtAfter: fac.lastDebt,
+    txHash: event.txHash,
+    logIndex: event.logIndex,
+    blockNumber: event.blockNumber,
+    timestamp: event.timestamp,
+  });
+  state.history.set(key, {
+    chainId: event.chainId,
+    facility: fac.facility,
+    cash: fac.accountedCash,
+    debt: fac.lastDebt,
+    principal: fac.principal,
+    creditLimit: fac.creditLimit,
+    txHash: event.txHash,
+    logIndex: event.logIndex,
+    blockNumber: event.blockNumber,
+    timestamp: event.timestamp,
+  });
 }
 
 /** Apply a decoded log. Returns true if state changed. */
 export function applyEvent(state: DerivedState, event: IndexedEventRecord): boolean {
   switch (event.eventName) {
+    case "FacilityCreated": {
+      const facility = argAddr(event, "facility");
+      const lender = argAddr(event, "lender");
+      const borrower = argAddr(event, "borrower");
+      const vault = asAddress(arg(event, "vault") ?? "0x0000000000000000000000000000000000000000");
+      const row: DirectFacilityRecord = {
+        ...emptyFacility(event.chainId, facility),
+        lender,
+        borrower,
+        vault,
+        termsHash: (arg(event, "termsHash") ?? emptyFacility(event.chainId, facility).termsHash) as DirectFacilityRecord["termsHash"],
+        lenderAccepted: (arg(event, "creator") ?? "").toLowerCase() === lender.toLowerCase(),
+        borrowerAccepted: (arg(event, "creator") ?? "").toLowerCase() === borrower.toLowerCase(),
+      };
+      state.facilities.set(`${event.chainId}:${facility.toLowerCase()}`, row);
+      state.terms.set(`${event.chainId}:${facility.toLowerCase()}`, termsFromFacility(row));
+      const creator = argAddr(event, "creator");
+      if (creator !== ZERO_ADDRESS) {
+        state.acceptances.set(`${event.chainId}:${facility.toLowerCase()}:${creator.toLowerCase()}`, {
+          chainId: event.chainId,
+          facility,
+          party: creator,
+          accepted: true,
+          txHash: event.txHash,
+          logIndex: event.logIndex,
+          timestamp: event.timestamp,
+        });
+      }
+      if (vault !== "0x0000000000000000000000000000000000000000") {
+        state.vaults.set(`${event.chainId}:${vault.toLowerCase()}`, {
+          chainId: event.chainId,
+          marketAddress: facility,
+          owner: borrower,
+          vault,
+          venueAssets: 0n,
+        });
+      }
+      return true;
+    }
+    case "TermsAccepted": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      const party = argAddr(event, "party");
+      if (party.toLowerCase() === fac.lender.toLowerCase()) fac.lenderAccepted = true;
+      if (party.toLowerCase() === fac.borrower.toLowerCase()) fac.borrowerAccepted = true;
+      state.acceptances.set(`${event.chainId}:${fac.facility.toLowerCase()}:${party.toLowerCase()}`, {
+        chainId: event.chainId,
+        facility: fac.facility,
+        party,
+        accepted: true,
+        txHash: event.txHash,
+        logIndex: event.logIndex,
+        timestamp: event.timestamp,
+      });
+      return true;
+    }
+    case "RequestDeclined": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.declined = true;
+      return true;
+    }
+    case "RequestCancelled": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.cancelled = true;
+      return true;
+    }
+    case "Activated": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.activatedAt = argBig(event, "activatedAt");
+      fac.borrowExpiry = argBig(event, "borrowExpiry");
+      fac.repaymentDueAt = argBig(event, "repaymentDueAt");
+      return true;
+    }
+    case "Funded": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.accountedCash = argBig(event, "cashAfter");
+      recordCashMutation(state, fac, event, "fund", argBig(event, "assets"));
+      return true;
+    }
+    case "CashWithdrawn": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.accountedCash = argBig(event, "cashAfter");
+      recordCashMutation(state, fac, event, "withdraw", argBig(event, "assets"));
+      return true;
+    }
+    case "AgreementEnded": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.ended = true;
+      return true;
+    }
+    case "RecallRequested": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.recallActive = true;
+      fac.recallDeadline = argBig(event, "deadline");
+      state.recalls.set(`${event.chainId}:${fac.facility.toLowerCase()}`, {
+        chainId: event.chainId,
+        facility: fac.facility,
+        reasonHash: (arg(event, "reasonHash") ?? "0x") as DirectRecallEpisodeRecord["reasonHash"],
+        reasonCode: Number(arg(event, "reasonCode") ?? "0"),
+        deadline: fac.recallDeadline,
+        cleared: false,
+        startedTxHash: event.txHash,
+        startedLogIndex: event.logIndex,
+        timestamp: event.timestamp,
+      });
+      return true;
+    }
+    case "RecallCleared": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (fac) {
+        fac.recallActive = false;
+        fac.recallDeadline = 0n;
+        const rec = state.recalls.get(`${event.chainId}:${fac.facility.toLowerCase()}`);
+        if (rec) rec.cleared = true;
+        return true;
+      }
+      const market = findMarketByAddress(state, event.chainId, event.address);
+      if (!market) return false;
+      market.recallActive = false;
+      market.recallDeadline = 0n;
+      market.recallClearableAt = 0n;
+      return true;
+    }
+    case "BorrowingPaused": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.borrowingPaused = true;
+      return true;
+    }
+    case "BorrowingResumed": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.borrowingPaused = false;
+      return true;
+    }
+    case "CapProposed": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      const digest = (arg(event, "digest") ?? "0x") as DirectCapProposalRecord["digest"];
+      state.caps.set(`${event.chainId}:${fac.facility.toLowerCase()}:${digest.toLowerCase()}`, {
+        chainId: event.chainId,
+        facility: fac.facility,
+        digest,
+        proposer: argAddr(event, "proposer"),
+        nonce: argBig(event, "nonce"),
+        validUntil: argBig(event, "validUntil"),
+        newCap: 0n,
+        lenderApproved: false,
+        borrowerApproved: false,
+        cancelled: false,
+        executed: false,
+      });
+      return true;
+    }
+    case "CapApproved": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      const digest = (arg(event, "digest") ?? "").toLowerCase();
+      const row = state.caps.get(`${event.chainId}:${fac.facility.toLowerCase()}:${digest}`);
+      if (!row) return false;
+      const party = argAddr(event, "party");
+      if (party.toLowerCase() === fac.lender.toLowerCase()) row.lenderApproved = true;
+      if (party.toLowerCase() === fac.borrower.toLowerCase()) row.borrowerApproved = true;
+      return true;
+    }
+    case "CapCancelled": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      const digest = (arg(event, "digest") ?? "").toLowerCase();
+      const row = state.caps.get(`${event.chainId}:${fac.facility.toLowerCase()}:${digest}`);
+      if (!row) return false;
+      row.cancelled = true;
+      return true;
+    }
+    case "CapExecuted": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (!fac) return false;
+      fac.creditLimit = argBig(event, "newCap");
+      const terms = state.terms.get(`${event.chainId}:${fac.facility.toLowerCase()}`);
+      if (terms) terms.creditLimit = fac.creditLimit;
+      for (const cap of state.caps.values()) {
+        if (cap.chainId === event.chainId && cap.facility.toLowerCase() === fac.facility.toLowerCase() && !cap.cancelled) {
+          cap.executed = true;
+          cap.newCap = fac.creditLimit;
+        }
+      }
+      return true;
+    }
     case "MarketCreated": {
       const address = argAddr(event, "market");
       const existing = findMarketByAddress(state, event.chainId, address);
@@ -126,8 +491,8 @@ export function applyEvent(state: DerivedState, event: IndexedEventRecord): bool
         epochAprRay: BASE_APR_RAY,
         supplyCap: 0n,
         borrowCap: 0n,
-        maxLtvBps: 7000,
-        liquidationThresholdBps: 8000,
+        maxLtvBps: 8000,
+        liquidationThresholdBps: 9000,
         liquidationBonusBps: 500,
         defaultPositionCap: 0n,
         supplyFrozen: false,
@@ -215,6 +580,17 @@ export function applyEvent(state: DerivedState, event: IndexedEventRecord): bool
       return true;
     }
     case "Borrowed": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (fac) {
+        const shares = argBig(event, "shares");
+        const assets = argBig(event, "assets");
+        fac.debtShares += shares;
+        fac.principal += assets;
+        if (fac.accountedCash >= assets) fac.accountedCash -= assets;
+        fac.lastDebt = argBig(event, "debtAfter");
+        recordCashMutation(state, fac, event, "borrow", assets);
+        return true;
+      }
       const market = findMarketByAddress(state, event.chainId, event.address);
       if (!market) return false;
       const owner = argAddr(event, "owner");
@@ -242,6 +618,18 @@ export function applyEvent(state: DerivedState, event: IndexedEventRecord): bool
       return true;
     }
     case "Repaid": {
+      const fac = findFacility(state, event.chainId, event.address);
+      if (fac) {
+        const sharesBurned = argBig(event, "sharesBurned");
+        const assets = argBig(event, "assets");
+        const principalPaid = argBig(event, "principalPaid");
+        if (fac.debtShares >= sharesBurned) fac.debtShares -= sharesBurned;
+        fac.accountedCash += assets;
+        if (fac.principal >= principalPaid) fac.principal -= principalPaid;
+        fac.lastDebt = fac.lastDebt > assets ? fac.lastDebt - assets : 0n;
+        recordCashMutation(state, fac, event, "repay", assets);
+        return true;
+      }
       const market = findMarketByAddress(state, event.chainId, event.address);
       if (!market) return false;
       const owner = argAddr(event, "owner");
@@ -305,14 +693,6 @@ export function applyEvent(state: DerivedState, event: IndexedEventRecord): bool
       market.recallActive = true;
       market.recallDeadline = argBig(event, "deadline");
       market.recallClearableAt = argBig(event, "clearableAt");
-      return true;
-    }
-    case "RecallCleared": {
-      const market = findMarketByAddress(state, event.chainId, event.address);
-      if (!market) return false;
-      market.recallActive = false;
-      market.recallDeadline = 0n;
-      market.recallClearableAt = 0n;
       return true;
     }
     case "PositionCapSet": {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ChainId, DecimalString, TxHash } from "./primitives.js";
+import { ChainId, DecimalString, TxHash } from "./primitives";
 
 export const ChainLag = z.object({
   chainId: ChainId,

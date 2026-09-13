@@ -4,12 +4,14 @@ pragma solidity ^0.8.24;
 import {MarketFixture} from "./MarketFixture.sol";
 import {LendingMarket} from "../../../src/v2/LendingMarket.sol";
 import {ILendingMarket} from "../../../src/v2/interfaces/ILendingMarket.sol";
+import {MarketFactory} from "../../../src/v2/MarketFactory.sol";
+import {MarketDeployer} from "../../../src/v2/MarketDeployer.sol";
 import {BorrowerVaultFactory} from "../../../src/v2/BorrowerVaultFactory.sol";
+import {VaultDeployer} from "../../../src/v2/VaultDeployer.sol";
 import {BorrowerVaultV2} from "../../../src/v2/BorrowerVaultV2.sol";
 import {MockERC4626Venue} from "../../../src/v2/mocks/MockERC4626Venue.sol";
 import {MockSwapRouter} from "../../../src/v2/mocks/MockSwapRouter.sol";
 import {MarketRecoveryEscrow} from "../../../src/v2/MarketRecoveryEscrow.sol";
-import {MarketFactory} from "../../../src/v2/MarketFactory.sol";
 import {TestAsset} from "../../../src/v2/mocks/TestAsset.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -31,9 +33,11 @@ contract RestrictedFixture is MarketFixture {
         router = new MockSwapRouter(IERC20(address(musdc)), IERC20(address(mweth)), 2000e6);
         mweth.mint(address(router), 10_000 ether);
         musdc.mint(address(router), 20_000_000e6);
-        vaultFactory = new BorrowerVaultFactory(address(venue), address(router), address(mweth));
+        vaultFactory = new BorrowerVaultFactory(
+            address(venue), address(router), address(mweth), address(new VaultDeployer())
+        );
         escrow = new MarketRecoveryEscrow(address(this));
-        factory = new MarketFactory(curator, address(escrow));
+        factory = new MarketFactory(curator, address(escrow), address(new MarketDeployer()));
         escrow.setRegistrar(address(factory));
         vm.prank(curator);
         restricted = LendingMarket(factory.createMarket(_restrictedInit()));
@@ -44,8 +48,8 @@ contract RestrictedFixture is MarketFixture {
             loanToken: address(musdc),
             collateralToken: address(mweth),
             oracle: address(oracle),
-            maxLtvBps: 7000,
-            liquidationThresholdBps: 8000,
+            maxLtvBps: 8000,
+            liquidationThresholdBps: 9000,
             liquidationBonusBps: 500,
             supplyCap: SUPPLY_CAP,
             borrowCap: BORROW_CAP,

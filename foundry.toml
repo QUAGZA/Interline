@@ -5,12 +5,33 @@ libs = ["lib"]
 solc_version = "0.8.24"
 optimizer = true
 optimizer_runs = 200
+via_ir = true
 ffi = false
 fs_permissions = [
     { access = "read", path = "./" },
     { access = "read-write", path = "./deployments" },
 ]
 gas_reports = ["CreditLine", "BorrowerVault"]
+
+[profile.ci]
+via_ir = true
+
+# Public testnets enforce EIP-170. Strip metadata and use size-favoring runs.
+[profile.sepolia]
+src = "src"
+out = "out-sepolia"
+libs = ["lib"]
+solc_version = "0.8.24"
+optimizer = true
+optimizer_runs = 1
+via_ir = true
+bytecode_hash = "none"
+cbor_metadata = false
+ffi = false
+fs_permissions = [
+    { access = "read", path = "./" },
+    { access = "read-write", path = "./deployments" },
+]
 
 [fmt]
 line_length = 120
@@ -20,3 +41,5 @@ int_types = "long"
 
 [rpc_endpoints]
 anvil = "http://127.0.0.1:8545"
+sepolia = "https://ethereum-sepolia-rpc.publicnode.com"
+base_sepolia = "https://sepolia.base.org"

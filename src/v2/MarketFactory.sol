@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {LendingMarket} from "./LendingMarket.sol";
 import {ILendingMarket} from "./interfaces/ILendingMarket.sol";
 import {MarketRecoveryEscrow} from "./MarketRecoveryEscrow.sol";
+import {MarketDeployer} from "./MarketDeployer.sol";
 
 /// @title MarketFactory
 /// @notice Curator-only listing of reviewed isolated markets. Participation is permissionless.
@@ -29,6 +29,7 @@ contract MarketFactory {
 
     address public curator;
     address public pendingCurator;
+    address public immutable marketDeployer;
     address[] public allMarkets;
     mapping(address => bool) public isMarket;
     MarketRecoveryEscrow public recoveryEscrow;
@@ -58,10 +59,11 @@ contract MarketFactory {
         _;
     }
 
-    constructor(address curator_, address recoveryEscrow_) {
-        if (curator_ == address(0)) revert ZeroAddress();
+    constructor(address curator_, address recoveryEscrow_, address marketDeployer_) {
+        if (curator_ == address(0) || marketDeployer_ == address(0)) revert ZeroAddress();
         curator = curator_;
         recoveryEscrow = MarketRecoveryEscrow(recoveryEscrow_);
+        marketDeployer = marketDeployer_;
     }
 
     function marketCount() external view returns (uint256) {
@@ -181,7 +183,7 @@ contract MarketFactory {
             _storePreset(id, init);
             emit PresetRegistered(id, uint8(init.deliveryMode));
         }
-        market = address(new LendingMarket(init));
+        market = MarketDeployer(marketDeployer).deploy(init);
         allMarkets.push(market);
         isMarket[market] = true;
         if (address(recoveryEscrow) != address(0)) {

@@ -82,22 +82,26 @@ Cash/debt-changing ops (supply, withdraw, redeem, borrow, repay, liquidate, writ
 
 `quoteScale36 = floor(Pc * 10^(36 + dl - dc) / Pl)`.
 
-- borrow capacity = collateral value in loan units × 70% (7000 bps)
-- liquidation capacity = value × 80% (8000 bps)
+- borrow capacity = collateral value in loan units × 80% (8000 bps)
+- liquidation capacity = value × 90% (9000 bps)
 - liquidation bonus = 5% (500 bps)
 - close factor = up to 100% of eligible debt
 - `liquidatable` iff `debt > liquidationCapacity` (`==` is still healthy)
 - no debt → typed `NO_DEBT` (no numeric HF)
 - invalid oracle → `UNAVAILABLE`, never a healthy number
 
-Collateral removal with debt must leave debt inside **max LTV**, not merely above LT. Invalid oracle blocks borrow, collateral-with-debt removal, and price liquidation; repay and add-collateral remain available.
+Collateral removal with debt must leave debt inside **max LTV** (80%), not merely above LT. Invalid oracle blocks borrow, collateral-with-debt removal, and price liquidation; repay and add-collateral remain available.
 
 Caps (supply 1e6 mUSDC, borrow 8e5; restricted default position ceiling 25_000 mUSDC) never revert repay, liquidation, or withdrawal.
 
 ## Liquidation and write-off
 
-Permissionless. Quote is exact debt shares **XOR** exact collateral. If collateral is exhausted and debt remains, write off `B`/`A` for that position, snapshot suppliers, mark defaulted, do not reopen. Restricted leftover borrowed funds cannot be swept to the borrower while recovery liability remains; later recoveries go to `MarketRecoveryEscrow`.
+Permissionless. Quote is exact debt shares **XOR** exact collateral. Exact-collateral sizes a repayment budget `floor(value * BPS / (BPS + bonusBps))`. If remaining debt caps burned shares below that budget, collateral out is recomputed from actual repayment + bonus (same two-ceil path as exact-debt mode) so the liquidator cannot keep the full request after paying only leftover debt. Residual collateral stays with the borrower and is withdrawable after a full debt close.
+
+Rounding in raw units: `valued = ceil(loanIn * (BPS + bonusBps) / BPS)`, `collateralOut = ceil(valued * PRICE_SCALE / scale36)`. Seized collateral value in loan raw units is at most `valued + floor((scale36 - 1) / PRICE_SCALE)`, plus 1 extra loan raw unit when the exact-collateral floor inverse is used (debt-share cap not binding).
+
+If collateral is exhausted and debt remains, write off `B`/`A` for that position, snapshot suppliers, mark defaulted, do not reopen. Restricted leftover borrowed funds cannot be swept to the borrower while recovery liability remains; later recoveries go to `MarketRecoveryEscrow`.
 
 ## Testnet fixture parameters (not production recommendations)
 
-mUSDC = $1 simulated, mWETH = $2,000 simulated. Recall window 300s Anvil / 3600s Base Sepolia. Recovery delay 300s Anvil / 24h Base Sepolia. Mock feed freshness 3600s. Sequencer grace 3600s. Min new borrow / leftover partial debt: 10 mUSDC. Min new supply: 1 mUSDC.
+mUSDC = $1 simulated, mWETH = $2,000 simulated. Recall window 300s Anvil / 3600s Base Sepolia and Ethereum Sepolia. Recovery delay 300s Anvil / 24h Base Sepolia and Ethereum Sepolia. Mock feed freshness 3600s. Sequencer grace 3600s. Min new borrow / leftover partial debt: 10 mUSDC. Min new supply: 1 mUSDC.

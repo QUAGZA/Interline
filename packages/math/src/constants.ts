@@ -13,6 +13,6 @@ export const SLOPE1_RAY = 8n * 10n ** 25n;
 export const SLOPE2_RAY = 9n * 10n ** 26n;
 export const APR_AT_KINK_RAY = 10n ** 26n;
 
-export const DEFAULT_LTV_BPS = 7000n;
-export const DEFAULT_LT_BPS = 8000n;
+export const DEFAULT_LTV_BPS = 8000n;
+export const DEFAULT_LT_BPS = 9000n;
 export const DEFAULT_BONUS_BPS = 500n;

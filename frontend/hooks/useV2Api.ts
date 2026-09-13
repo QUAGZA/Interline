@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 // Query keys take explicit chain/market/account — never useAccount().chainId.
-import { fetchChains, fetchEvents, fetchMarket, fetchMarkets, fetchPortfolio, fetchPosition, fetchPositions } from "@/lib/api/client";
+import { fetchChains, fetchDirectFacilities, fetchDirectFacility, fetchEvents, fetchMarket, fetchMarkets, fetchPortfolio, fetchPosition, fetchPositions } from "@/lib/api/client";
 import { qk } from "@/lib/api/keys";
 import type { PositionsQuery } from "@/lib/api/types";
 import type { V2ChainId } from "@/lib/chains";
@@ -49,6 +49,25 @@ export function useEventsQuery(chainId?: number, address?: string) {
   return useQuery({
     queryKey: qk.events(chainId, address),
     queryFn: () => fetchEvents(chainId, address),
+  });
+}
+
+export function useDirectFacilitiesQuery(
+  args: { chainId?: number; party?: string; role?: string },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: qk.directFacilities(args.chainId, args.party, args.role),
+    queryFn: () => fetchDirectFacilities(args),
+    enabled,
+  });
+}
+
+export function useDirectFacilityQuery(chainId: number, facility: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.directFacility(chainId, facility),
+    queryFn: () => fetchDirectFacility(chainId, facility),
+    enabled,
   });
 }
 

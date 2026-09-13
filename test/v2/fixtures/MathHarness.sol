@@ -187,4 +187,12 @@ contract MathHarness {
     ) external pure returns (uint256) {
         return LiquidationMath.minCollateralOut(ownerDebtShares, ownerCollateral, indexRay, scale36, bonusBps);
     }
+
+    function maxSeizedValueLoan(uint256 loanIn, uint256 scale36, uint16 bonusBps, bool debtShareCapBound)
+        external
+        pure
+        returns (uint256)
+    {
+        return LiquidationMath.maxSeizedValueLoan(loanIn, scale36, bonusBps, debtShareCapBound);
+    }
 }

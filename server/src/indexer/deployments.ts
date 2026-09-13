@@ -6,6 +6,7 @@ import type { IndexerEnv } from "../env.js";
 const NAMES: Record<number, string> = {
   31337: "Anvil",
   84532: "Base Sepolia",
+  11155111: "Ethereum Sepolia",
 };
 
 type ManifestMarket = {
@@ -24,6 +25,8 @@ type Manifest = {
   vaultFactory?: string;
   recoveryEscrow?: string;
   lens?: string;
+  directFactory?: string;
+  directLens?: string;
   startBlock: number;
   oracleMode: "simulated";
   faucet: string;
@@ -37,7 +40,7 @@ function readManifest(dir: string, chainId: number): Manifest | null {
 }
 
 function rpcFor(env: IndexerEnv, chainId: number): string | undefined {
-  return env.rpcByChain.get(chainId) ?? (chainId === 31337 ? env.rpcUrl : undefined);
+  return env.rpcByChain.get(chainId);
 }
 
 export function loadChainConfigs(env: IndexerEnv): ChainConfig[] {
@@ -62,6 +65,8 @@ export function loadChainConfigs(env: IndexerEnv): ChainConfig[] {
         startBlock: BigInt(manifest.startBlock),
         oracleMode: "simulated",
         faucet: asAddress(manifest.faucet),
+        directFactory: manifest.directFactory ? asAddress(manifest.directFactory) : null,
+        directLens: manifest.directLens ? asAddress(manifest.directLens) : null,
         markets: manifest.markets.map((m) => ({
           id: m.id,
           address: asAddress(m.address),
@@ -87,6 +92,8 @@ export function loadChainConfigs(env: IndexerEnv): ChainConfig[] {
         startBlock: env.startBlock,
         oracleMode: "simulated",
         faucet: null,
+        directFactory: null,
+        directLens: null,
         markets: [],
       });
     }
@@ -95,6 +102,7 @@ export function loadChainConfigs(env: IndexerEnv): ChainConfig[] {
   if (env.chainId) tryChain(env.chainId);
   tryChain(31337);
   tryChain(84532);
+  tryChain(11155111);
   return configs;
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyMarket, MemoryStore } from "../src/db/memory.js";
 import { rollbackToBlock } from "../src/indexer/reorg.js";
-import type { ChainConfig, IndexedEventRecord, MarketRecord } from "../src/domain.js";
+import { cursorHydrationDefaults, type ChainConfig, type IndexedEventRecord, type MarketRecord } from "../src/domain.js";
 
 const MARKET = "0x00000000000000000000000000000000000000a1";
 const USER = "0x00000000000000000000000000000000000000b1";
@@ -17,6 +17,8 @@ const config: ChainConfig = {
   startBlock: 1n,
   oracleMode: "simulated",
   faucet: null,
+  directFactory: null,
+  directLens: null,
   markets: [
     {
       id: "usdc-weth-wallet",
@@ -68,6 +70,7 @@ describe("reorg rollback", () => {
 
   it("resumes from cursor lastBlock without genesis rescan", async () => {
     const store = new MemoryStore();
+    const now = new Date().toISOString();
     await store.upsertCursor({
       chainId: 31337,
       startBlock: 1n,
@@ -76,7 +79,9 @@ describe("reorg rollback", () => {
       lastTimestamp: 50n,
       headBlock: 50n,
       lastError: null,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      ...cursorHydrationDefaults({ updatedAt: now }),
+      lastPolledAt: now,
     });
     const cursor = await store.getCursor(31337);
     expect(cursor?.lastBlock).toBe(50n);

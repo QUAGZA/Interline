@@ -9,6 +9,7 @@ import { V2_CHAINS } from "@/lib/chains";
 import { formatUsdFromWad } from "@/lib/money";
 import { minDec } from "@/lib/money";
 import type { HealthCode, PortfolioDto } from "@/lib/api/types";
+import type { DirectFacilityDto } from "@/features/direct/dto";
 
 export function DashboardView() {
   const { address, isConnected } = useAccount();
@@ -44,11 +45,25 @@ export function DashboardView() {
 function ConnectedDashboard({ address }: { address: `0x${string}` }) {
   const a = usePortfolioQuery(31337, address);
   const b = usePortfolioQuery(84532, address);
-  const portfolios = [a.data?.data, b.data?.data].filter(Boolean) as PortfolioDto[];
-  const usingStub = Boolean(a.data?.usingStub || b.data?.usingStub);
+  const c = usePortfolioQuery(11155111, address);
+  const portfolios = [a.data?.data, b.data?.data, c.data?.data].filter(Boolean) as PortfolioDto[];
+  const usingStub = Boolean(
+    [a, b, c].every((x) => x.data?.usingStub) && ![a, b, c].some((x) => x.data?.source === "rpc" || x.data?.source === "indexer"),
+  );
+  const stale = Boolean(a.data?.stale || b.data?.stale || c.data?.stale);
+  const source = [a, b, c].some((x) => x.data?.source === "rpc")
+    ? ("rpc" as const)
+    : [a, b, c].some((x) => x.data?.source === "indexer")
+      ? ("indexer" as const)
+      : usingStub
+        ? ("stub" as const)
+        : undefined;
 
   const supplies = portfolios.flatMap((p) => p.supplies.map((s) => ({ ...s, chainId: p.chainId })));
   const borrows = portfolios.flatMap((p) => p.borrows.map((row) => ({ ...row, chainId: p.chainId })));
+  const directLending = portfolios.flatMap((p) => (p.directLending ?? []).map((row) => ({ ...row, chainId: p.chainId })));
+  const directBorrowing = portfolios.flatMap((p) => (p.directBorrowing ?? []).map((row) => ({ ...row, chainId: p.chainId })));
+  const directRequests = portfolios.flatMap((p) => (p.directRequests ?? []).map((row) => ({ ...row, chainId: p.chainId })));
 
   const isolatedHfs = borrows.filter((x) => x.healthCode === "OK" && x.healthFactorWad).map((x) => x.healthFactorWad as string);
   const anyUnavailable = borrows.some((x) => x.healthCode === "UNAVAILABLE");
@@ -66,10 +81,10 @@ function ConnectedDashboard({ address }: { address: `0x${string}` }) {
       <PageHeader
         kicker="03 / Dashboard"
         title="YOUR POSITIONS"
-        description="Each market keeps its own health factor. The figure below is the lowest isolated HF, not a blended ratio."
+        description="Each market keeps its own health factor. Direct agreements use the same 80% origination LTV and never enter that pool figure."
         actions={<OracleBanner />}
       />
-      <SourceBanner usingStub={usingStub} />
+      <SourceBanner usingStub={usingStub} stale={stale} source={source} />
       <div className="border border-border/50 bg-card px-4 py-3">
         <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Lowest isolated health</p>
         <div className="mt-2 text-lg">
@@ -83,7 +98,7 @@ function ConnectedDashboard({ address }: { address: `0x${string}` }) {
             Supply is not collateral. Withdrawable cash can be less than supplied.
           </p>
           {supplies.length === 0 ? (
-            <p className="font-mono text-sm text-muted-foreground">No supplies on Anvil or Base Sepolia.</p>
+            <p className="font-mono text-sm text-muted-foreground">No supplies on Anvil, Base Sepolia, or Ethereum Sepolia.</p>
           ) : (
             <ul className="space-y-3">
               {supplies.map((s) => (
@@ -108,7 +123,7 @@ function ConnectedDashboard({ address }: { address: `0x${string}` }) {
             Collateral is listed separately from supply. Restricted borrows do not land on the EOA.
           </p>
           {borrows.length === 0 ? (
-            <p className="font-mono text-sm text-muted-foreground">No borrows on Anvil or Base Sepolia.</p>
+            <p className="font-mono text-sm text-muted-foreground">No borrows on Anvil, Base Sepolia, or Ethereum Sepolia.</p>
           ) : (
             <ul className="space-y-3">
               {borrows.map((row) => (
@@ -132,6 +147,26 @@ function ConnectedDashboard({ address }: { address: `0x${string}` }) {
           )}
         </div>
       </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <DirectList
+          title="Direct lending"
+          empty="No direct lending agreements."
+          rows={directLending}
+          you="lender"
+        />
+        <DirectList
+          title="Direct borrowing"
+          empty="No direct borrowing agreements."
+          rows={directBorrowing}
+          you="borrower"
+        />
+      </div>
+      <DirectList
+        title="Pending requests"
+        empty="No direct requests waiting on this wallet. Switch to the other wallet and Connect on Ethereum Sepolia, then open Direct lending."
+        rows={directRequests}
+        you="party"
+      />
       <div className="flex flex-wrap gap-4 font-mono text-[11px] uppercase tracking-widest">
         <Link href="/dashboard/activity" className="text-accent">
           Activity
@@ -142,7 +177,53 @@ function ConnectedDashboard({ address }: { address: `0x${string}` }) {
         <Link href={`/accounts/31337/${address}`} className="text-muted-foreground hover:text-foreground">
           Watch-only (Anvil)
         </Link>
+        <Link href={`/accounts/11155111/${address}`} className="text-muted-foreground hover:text-foreground">
+          Watch-only (Ethereum Sepolia)
+        </Link>
       </div>
     </section>
+  );
+}
+
+function DirectList({
+  title,
+  empty,
+  rows,
+  you,
+}: {
+  title: string;
+  empty: string;
+  rows: DirectFacilityDto[];
+  you: "lender" | "borrower" | "party";
+}) {
+  return (
+    <div>
+      <h2 className="font-[var(--font-bebas)] text-3xl tracking-tight mb-3">{title}</h2>
+      <p className="mb-3 font-mono text-[11px] text-muted-foreground">
+        Overcollateralized restricted-use credit (max 80% LTV). Timelines below are repayment or recall, not
+        liquidation.
+      </p>
+      {rows.length === 0 ? (
+        <p className="font-mono text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        <ul className="space-y-3">
+          {rows.map((row) => (
+            <li key={`${row.chainId}-${row.facility}`} className="border border-border/50 bg-card p-4 space-y-1">
+              <Link href={`/direct/${row.chainId}/${row.facility}`} className="font-mono text-sm hover:text-accent">
+                {you === "lender" ? "Lending to" : you === "borrower" ? "Borrowing from" : "Request with"}{" "}
+                {you === "lender" ? row.borrower : row.lender}
+              </Link>
+              <p className="font-mono text-xs">
+                Outstanding <TokenAmount raw={row.debtRaw} decimals={6} symbol="mUSDC" /> · Cash{" "}
+                <TokenAmount raw={row.availableCashRaw} decimals={6} symbol="mUSDC" />
+              </p>
+              <p className="font-mono text-[11px] text-muted-foreground">
+                Repayment timeline {row.repaymentDueAt ?? "—"} · Recall timeline {row.recallDeadline ?? "not requested"}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

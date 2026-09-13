@@ -143,7 +143,9 @@ contract RestrictedVaultTest is RestrictedFixture {
     }
 
     function test_WrongFactoryAndWalletModeRejected() public {
-        BorrowerVaultFactory other = new BorrowerVaultFactory(address(venue), address(router), address(mweth));
+        BorrowerVaultFactory other = new BorrowerVaultFactory(
+            address(venue), address(router), address(mweth), vaultFactory.vaultDeployer()
+        );
         vm.prank(bob);
         vm.expectRevert(BorrowerVaultFactory.WrongFactory.selector);
         other.createVault(address(restricted), bob);
@@ -155,13 +157,13 @@ contract RestrictedVaultTest is RestrictedFixture {
     function test_PublicUnwindSwapAfterDeadline() public {
         BorrowerVaultV2 vault = _openRestrictedBorrow(alice, bob, 50_000e6, 20 ether, 2_000e6);
         vm.prank(bob);
-        vault.swap(address(musdc), address(mweth), 2_000e6, 0, block.timestamp + 1);
+        vault.swap(address(musdc), address(mweth), 2_000e6, 0, block.timestamp + 1 hours);
         vm.prank(guardian);
         restricted.startRecall("incident");
         vm.warp(block.timestamp + 301);
         uint256 wethBal = mweth.balanceOf(address(vault));
         vm.prank(carol);
-        vault.publicUnwindSwap(wethBal, 0, block.timestamp + 1);
+        vault.publicUnwindSwap(wethBal, 0, block.timestamp + 1 hours);
         assertEq(mweth.balanceOf(address(vault)), 0);
         assertLt(restricted.positionDebt(bob), 2_000e6);
         assertEq(musdc.balanceOf(carol), 0);

@@ -35,7 +35,24 @@ export const marketAbi = parseAbi([
 export const vaultAbi = parseAbi([
   "function owner() view returns (address)",
   "function adapter() view returns (address)",
+  "function idleLoan() view returns (uint256)",
+  "function venueShares() view returns (uint256)",
   "function publicExitAndRepay(uint256 assets, uint256 maxShares)",
+]);
+
+export const directFacilityAbi = parseAbi([
+  "function ended() view returns (bool)",
+  "function lenderAccepted() view returns (bool)",
+  "function borrowerAccepted() view returns (bool)",
+  "function repaymentDueAt() view returns (uint64)",
+  "function recallDeadline() view returns (uint64)",
+  "function vault() view returns (address)",
+  "function currentDebt() view returns (uint256)",
+  "function collateralPosted() view returns (uint256)",
+  "function previewSettlement() view returns (uint256 collateralToLender, uint256 residualToBorrower, uint256 debtCredit)",
+  "function recoverVenue(uint256 assets, uint256 maxShares)",
+  "function repayFromVault(uint256 maxAssets)",
+  "function settleDefault()",
 ]);
 
 export const adapterAbi = parseAbi(["function venue() view returns (address)"]);

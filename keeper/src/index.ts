@@ -1,6 +1,8 @@
 /**
- * Optional testnet keeper. Anyone may liquidate or execute post-deadline recall exits;
+ * Optional testnet helper. Anyone may liquidate or execute post-deadline recovery;
  * this process has no exclusive rights and never holds a user key.
+ * It does not provide complete automatic protection: API pages can lag, quotes can
+ * drift, venues can be illiquid, settlement can fail, and uneconomic full-debt closes are skipped.
  *
  *   KEEPER_PRIVATE_KEY=0x... RPC_URL=http://127.0.0.1:8545 npm run start -w @interline/keeper
  */
@@ -13,9 +15,11 @@ import { fileURLToPath } from "node:url";
 import { loadKeeperConfig, type KeeperConfig } from "./config.js";
 import { liquidateIfUnhealthy } from "./liquidations.js";
 import { publicRecallExitIfOpen } from "./recalls.js";
+import { recoverDirectIfOpen } from "./recovery.js";
 import { sendCall, type TxClients } from "./transactions.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const API_PAGE_CAP = 200;
 
 const borrowedEvent = parseAbiItem(
   "event Borrowed(address indexed owner, uint256 assets, uint256 shares, address destination, uint256 debtAfter)",
@@ -32,21 +36,69 @@ function chainOf(chainId: number, rpcUrl: string) {
   });
 }
 
-async function positionsFromApi(apiUrl: string, chainId: number): Promise<PositionRow[] | undefined> {
-  const url = `${apiUrl.replace(/\/$/, "")}/v1/positions?chainId=${chainId}&limit=100`;
-  try {
+async function pageJson<T>(
+  apiUrl: string,
+  path: string,
+  query: Record<string, string>,
+): Promise<{ items: T[]; ok: boolean }> {
+  const items: T[] = [];
+  let cursor: string | null = null;
+  let pages = 0;
+  let ok = false;
+  do {
+    const url = new URL(path, `${apiUrl.replace(/\/$/, "")}/`);
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+    if (cursor) url.searchParams.set("cursor", cursor);
     const res = await fetch(url);
-    if (!res.ok) return undefined;
+    if (!res.ok) return { items, ok };
+    ok = true;
     const body = (await res.json()) as {
-      positions?: Array<{ marketAddress?: string; market?: string; owner?: string }>;
-      items?: Array<{ marketAddress?: string; market?: string; owner?: string }>;
+      positions?: T[];
+      items?: T[];
+      facilities?: T[];
+      nextCursor?: string | null;
     };
-    const items = body.positions ?? body.items ?? [];
+    const page = body.positions ?? body.facilities ?? body.items ?? [];
+    items.push(...page);
+    cursor = body.nextCursor ?? null;
+    pages += 1;
+  } while (cursor && pages < API_PAGE_CAP);
+  return { items, ok };
+}
+
+async function positionsFromApi(apiUrl: string, chainId: number): Promise<PositionRow[] | undefined> {
+  try {
+    const { items, ok } = await pageJson<{ marketAddress?: string; market?: string; owner?: string }>(
+      apiUrl,
+      "v1/positions",
+      { chainId: String(chainId) },
+    );
+    if (!ok) return undefined;
     const out: PositionRow[] = [];
     for (const row of items) {
       const market = (row.marketAddress ?? row.market) as Address | undefined;
       const owner = row.owner as Address | undefined;
       if (market && owner) out.push({ market, owner });
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+async function facilitiesFromApi(apiUrl: string, chainId: number): Promise<Address[] | undefined> {
+  try {
+    const { items, ok } = await pageJson<{ facility?: string }>(apiUrl, "v1/direct-facilities", {
+      chainId: String(chainId),
+    });
+    if (!ok) return undefined;
+    const out: Address[] = [];
+    const seen = new Set<string>();
+    for (const row of items) {
+      const facility = row.facility as Address | undefined;
+      if (!facility || seen.has(facility.toLowerCase())) continue;
+      seen.add(facility.toLowerCase());
+      out.push(facility);
     }
     return out;
   } catch {
@@ -78,6 +130,22 @@ async function maybeDrip(clients: TxClients, dryRun: boolean, faucet: Address): 
     await sendCall(clients, dryRun, "faucet drip", faucet, data);
   } catch (err) {
     console.warn("faucet drip skipped:", err instanceof Error ? err.message : err);
+  }
+}
+
+async function tickDirectRecovery(clients: TxClients, cfg: KeeperConfig, manifest: V2Manifest): Promise<void> {
+  if (!cfg.apiUrl) return;
+  const facilities = await facilitiesFromApi(cfg.apiUrl, manifest.chainId);
+  if (!facilities) {
+    console.warn("direct recovery discovery skipped: /v1/direct-facilities unavailable");
+    return;
+  }
+  for (const facility of facilities) {
+    try {
+      await recoverDirectIfOpen(clients, cfg.dryRun, { facility });
+    } catch (err) {
+      console.warn(`direct recover ${facility} failed:`, err instanceof Error ? err.message : err);
+    }
   }
 }
 
@@ -140,6 +208,8 @@ async function tick(clients: TxClients, cfg: KeeperConfig, manifest: V2Manifest)
       }
     }
   }
+
+  await tickDirectRecovery(clients, cfg, manifest);
 }
 
 async function main(): Promise<void> {
@@ -156,15 +226,23 @@ async function main(): Promise<void> {
 
   const manifest = loadV2Manifest(cfg.chainId, REPO_ROOT);
   console.log(
-    `keeper ${account.address} chain=${cfg.chainId} dryRun=${cfg.dryRun} markets=${manifest.markets.length} (public liquidate/recall-exit; no exclusive rights)`,
+    `keeper ${account.address} chain=${cfg.chainId} dryRun=${cfg.dryRun} markets=${manifest.markets.length} (public liquidate/recall-exit/direct-recover/settleDefault; no exclusive rights; not complete automatic protection)`,
   );
   await maybeDrip(clients, cfg.dryRun, manifest.faucet);
 
+  let inFlight = false;
   const loop = async () => {
+    if (inFlight) {
+      console.warn("keeper tick skipped: previous tick still in flight");
+      return;
+    }
+    inFlight = true;
     try {
       await tick(clients, cfg, manifest);
     } catch (err) {
       console.error("keeper tick failed:", err instanceof Error ? err.message : err);
+    } finally {
+      inFlight = false;
     }
   };
   await loop();

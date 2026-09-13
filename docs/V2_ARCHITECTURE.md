@@ -2,7 +2,7 @@
 
 Interline V2 is an isolated, permissionless lending application. Any wallet can supply, post collateral, borrow, repay, and withdraw inside a selected market. Users sign their own transactions. The indexer/API never holds participant keys. An optional keeper may call the same public liquidation and recall-exit functions anyone else can call.
 
-This document describes the running system. Economics live in [V2_RISK_AND_ACCOUNTING.md](./V2_RISK_AND_ACCOUNTING.md). HTTP reads live in [V2_API.md](./V2_API.md). Local and Base Sepolia steps live in [V2_LOCAL_AND_TESTNET_RUNBOOK.md](./V2_LOCAL_AND_TESTNET_RUNBOOK.md). Mainnet is a separately gated milestone — see [V2_PRODUCTION_GATES.md](./V2_PRODUCTION_GATES.md).
+This document describes the running system. Economics live in [V2_RISK_AND_ACCOUNTING.md](./V2_RISK_AND_ACCOUNTING.md). HTTP reads live in [V2_API.md](./V2_API.md). Local, Base Sepolia, and Ethereum Sepolia steps live in [V2_LOCAL_AND_TESTNET_RUNBOOK.md](./V2_LOCAL_AND_TESTNET_RUNBOOK.md). Mainnet is a separately gated milestone — see [V2_PRODUCTION_GATES.md](./V2_PRODUCTION_GATES.md).
 
 ## Processes
 
@@ -11,7 +11,7 @@ Wallet  --signs own txs-->  LendingMarket (isolated pool)
 Factory --creates-->        LendingMarket
 Market  --wallet mode-->    owner EOA
 Market  --restricted-->     BorrowerVaultV2 --> typed venue adapter / swap router
-Oracle  --quote-->          Market (simulated feeds on Anvil / Base Sepolia)
+Oracle  --quote-->          Market (simulated feeds on Anvil / Base Sepolia / Ethereum Sepolia)
 Market/Vault events -->     Indexer --> PostgreSQL 16 --> public /v1 API --> Next.js app
 Optional keeper -->         public liquidate() / publicExitAndRepay()
 ```
@@ -22,7 +22,7 @@ Optional keeper -->         public liquidate() / publicExitAndRepay()
 | `server/` | Durable indexer + Hono `/v1` | RPC, DB, factory, start block only. Refuses `PRIVATE_KEY` / `BORROWER_PRIVATE_KEY` |
 | `keeper/` | Optional loop for public liquidations and post-deadline recall exits | `KEEPER_PRIVATE_KEY` only — dedicated funded key, no exclusive rights |
 | PostgreSQL 16 | Indexer checkpoint, positions, events | Compose `compose.yaml` |
-| Anvil / Base Sepolia RPC | Chain | Deployer key for scripts only |
+| Anvil / Base Sepolia / Ethereum Sepolia RPC | Chain | Deployer key for scripts only |
 
 ## On-chain layout (`src/v2/`)
 
@@ -52,6 +52,7 @@ Each environment writes `deployments/{chainId}/v2.json` (schema: `deployments/sc
 
 - Anvil `31337` — `script/DeployV2Local.s.sol` (recall 300s, recovery delay 300s, faucet seed).
 - Base Sepolia `84532` — `script/DeployV2Testnet.s.sol` (recall 3600s, recovery delay 24h).
+- Ethereum Sepolia `11155111` — same `DeployV2Testnet` (recall 3600s, recovery delay 24h). Public L1 testnet; EIP-170 applies.
 
 Manifests include factory, start block, two markets (wallet + restricted), faucet, and `oracleMode: "simulated"`. They do not enumerate permitted lenders/borrowers.
 

@@ -24,7 +24,7 @@ export function WatchAccount({ chainId, address }: { chainId: V2ChainId; address
         description={`${shortAddr(address)} is displayed as a public portfolio. This page never treats the address as a signer.`}
         actions={<OracleBanner />}
       />
-      <SourceBanner usingStub={q.data?.usingStub} />
+      <SourceBanner usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />
       {isSame ? (
         <p className="border border-border/50 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
           You are connected as this address, but this route stays watch-only. Manage positions on the{" "}
