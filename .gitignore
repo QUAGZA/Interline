@@ -7,7 +7,9 @@ frontend/.env.local
 
 # Foundry
 out/
+out-*/
 cache/
+cache-*/
 broadcast/
 coverage/
 lcov.info
@@ -27,6 +29,10 @@ keeper/node_modules/
 .idea/
 .vscode/
 *.swp
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/
 
 # Logs
 *.log

@@ -30,3 +30,7 @@ export const qk = {
   directFacility: (chainId: number, facility: string) =>
     ["v2", "direct-one", chainId, facility.toLowerCase()] as const,
 };
+
+export function walletBalancesKey(chainId: number, address: AddressString) {
+  return ["v2", "wallet-balances", chainId, address.toLowerCase()] as const;
+}

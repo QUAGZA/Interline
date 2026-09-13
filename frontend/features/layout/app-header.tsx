@@ -8,6 +8,7 @@ import { defaultV2ChainId } from "@/lib/config";
 import { useAppPrefs } from "@/features/settings/prefs";
 import { shortAddr } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { WalletStrip } from "@/components/ui/wallet-strip";
 
 const NAV = [
   { href: "/markets", label: "Markets", match: (p: string) => p.startsWith("/markets") },
@@ -115,6 +116,7 @@ export function AppHeader() {
             </label>
             {isConnected ? (
               <div className="space-y-2">
+                <WalletStrip chainId={viewing} />
                 <p className="font-mono text-xs">{ens ?? shortAddr(address)}</p>
                 <button type="button" onClick={() => disconnect()} className="font-mono text-[10px] uppercase tracking-widest">
                   Disconnect
@@ -161,7 +163,8 @@ export function AppHeader() {
             </button>
           ) : null}
           {isConnected ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <WalletStrip chainId={viewing} />
               <Link
                 href="/dashboard"
                 className="font-mono text-xs text-foreground hover:text-accent"

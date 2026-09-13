@@ -2,17 +2,24 @@
 
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { OracleBanner, PageHeader, SourceBanner } from "@/components/ui/chrome";
+import { HeaderMeta, PageHeader } from "@/components/ui/chrome";
+import { HeroMetric } from "@/components/ui/hero-metric";
+import { InfoTip } from "@/components/ui/info-tip";
 import { HealthDisplay, TokenAmount } from "@/features/risk/health-display";
+import { TestnetFaucetButton } from "@/features/testnet-faucet";
 import { usePortfolioQuery } from "@/hooks/useV2Api";
-import { V2_CHAINS } from "@/lib/chains";
-import { formatUsdFromWad } from "@/lib/money";
+import { useWalletCatalogBalances } from "@/hooks/useWalletCatalogBalances";
+import { useCatalogChainId } from "@/lib/use-catalog-chain";
+import { V2_CHAINS, chainName, isV2ChainId } from "@/lib/chains";
+import { formatTokenAmount } from "@/lib/money";
+import { formatUnixDate, shortAddr } from "@/lib/format";
 import { minDec } from "@/lib/money";
-import type { HealthCode, PortfolioDto } from "@/lib/api/types";
+import type { HealthCode } from "@/lib/api/types";
 import type { DirectFacilityDto } from "@/features/direct/dto";
 
 export function DashboardView() {
   const { address, isConnected } = useAccount();
+  const chainId = useCatalogChainId();
 
   if (!isConnected || !address) {
     return (
@@ -20,50 +27,48 @@ export function DashboardView() {
         <PageHeader
           kicker="03 / Dashboard"
           title="YOUR POSITIONS"
-          description="Supplies and borrows stay in separate columns. Health is never blended across isolated markets."
-          actions={<OracleBanner />}
+          description={`${chainName(chainId)} wallet view.`}
+          actions={<HeaderMeta />}
         />
-        <div className="border border-border/50 bg-card p-8 max-w-lg space-y-4">
-          <p className="font-mono text-sm text-muted-foreground">
-            Connect a wallet to load this address&apos;s supplies and borrows. Markets and the public desk stay readable
-            without a wallet.
-          </p>
-          <Link
-            href="/connect?return=/dashboard"
-            className="inline-block border border-accent bg-accent px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-accent-foreground"
-          >
-            Connect
-          </Link>
+        <div className="border border-border/50 bg-card p-6 max-w-lg space-y-4">
+          <p className="font-mono text-sm text-muted-foreground">Connect to see wallet mUSDC, mWETH, and positions.</p>
+          <div className="flex flex-wrap gap-3 font-mono text-[10px] uppercase tracking-widest">
+            <Link
+              href="/connect?return=/dashboard"
+              className="border border-accent bg-accent px-4 py-2 text-accent-foreground"
+            >
+              Connect
+            </Link>
+            <Link href="/markets" className="border border-border px-4 py-2">
+              Markets
+            </Link>
+            <Link href="/direct" className="border border-border px-4 py-2">
+              Direct lending
+            </Link>
+          </div>
         </div>
       </section>
     );
   }
 
-  return <ConnectedDashboard address={address} />;
+  return <ConnectedDashboard address={address} chainId={chainId} />;
 }
 
-function ConnectedDashboard({ address }: { address: `0x${string}` }) {
-  const a = usePortfolioQuery(31337, address);
-  const b = usePortfolioQuery(84532, address);
-  const c = usePortfolioQuery(11155111, address);
-  const portfolios = [a.data?.data, b.data?.data, c.data?.data].filter(Boolean) as PortfolioDto[];
-  const usingStub = Boolean(
-    [a, b, c].every((x) => x.data?.usingStub) && ![a, b, c].some((x) => x.data?.source === "rpc" || x.data?.source === "indexer"),
-  );
-  const stale = Boolean(a.data?.stale || b.data?.stale || c.data?.stale);
-  const source = [a, b, c].some((x) => x.data?.source === "rpc")
-    ? ("rpc" as const)
-    : [a, b, c].some((x) => x.data?.source === "indexer")
-      ? ("indexer" as const)
-      : usingStub
-        ? ("stub" as const)
-        : undefined;
+function ConnectedDashboard({ address, chainId }: { address: `0x${string}`; chainId: ReturnType<typeof useCatalogChainId> }) {
+  const q = usePortfolioQuery(chainId, address);
+  const portfolio = q.data?.data;
+  const balances = useWalletCatalogBalances(chainId);
+  const supplies = portfolio?.supplies ?? [];
+  const borrows = portfolio?.borrows ?? [];
+  const directLending = portfolio?.directLending ?? [];
+  const directBorrowing = portfolio?.directBorrowing ?? [];
+  const directRequests = portfolio?.directRequests ?? [];
 
-  const supplies = portfolios.flatMap((p) => p.supplies.map((s) => ({ ...s, chainId: p.chainId })));
-  const borrows = portfolios.flatMap((p) => p.borrows.map((row) => ({ ...row, chainId: p.chainId })));
-  const directLending = portfolios.flatMap((p) => (p.directLending ?? []).map((row) => ({ ...row, chainId: p.chainId })));
-  const directBorrowing = portfolios.flatMap((p) => (p.directBorrowing ?? []).map((row) => ({ ...row, chainId: p.chainId })));
-  const directRequests = portfolios.flatMap((p) => (p.directRequests ?? []).map((row) => ({ ...row, chainId: p.chainId })));
+  const supplied = sumRaw(supplies.map((s) => s.assets.raw));
+  const poolDebt = sumRaw(borrows.map((b) => b.debt.raw));
+  const directDebt = sumRaw(directBorrowing.map((r) => r.debtRaw));
+  const debt = poolDebt + directDebt;
+  const collateral = sumRaw(borrows.map((b) => b.collateral.raw));
 
   const isolatedHfs = borrows.filter((x) => x.healthCode === "OK" && x.healthFactorWad).map((x) => x.healthFactorWad as string);
   const anyUnavailable = borrows.some((x) => x.healthCode === "UNAVAILABLE");
@@ -76,97 +81,142 @@ function ConnectedDashboard({ address }: { address: `0x${string}` }) {
         ? "NO_DEBT"
         : "OK";
 
+  const musdcZero = balances.ready && (balances.musdc === undefined || balances.musdc === 0n);
+
   return (
-    <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-8">
+    <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-6">
       <PageHeader
         kicker="03 / Dashboard"
         title="YOUR POSITIONS"
-        description="Each market keeps its own health factor. Direct agreements use the same 80% origination LTV and never enter that pool figure."
-        actions={<OracleBanner />}
+        description={chainName(chainId)}
+        actions={<HeaderMeta usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />}
       />
-      <SourceBanner usingStub={usingStub} stale={stale} source={source} />
-      <div className="border border-border/50 bg-card px-4 py-3">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Lowest isolated health</p>
-        <div className="mt-2 text-lg">
-          <HealthDisplay code={lowestCode} wad={lowestWad} />
-        </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <HeroMetric
+          label="Wallet mUSDC"
+          value={formatTokenAmount(balances.musdc ?? 0n, 6)}
+          hint="Spendable Interline test mUSDC in this wallet. Not Circle USDC."
+        />
+        <HeroMetric
+          label="Wallet mWETH"
+          value={formatTokenAmount(balances.mweth ?? 0n, 18, undefined, 4)}
+          hint="Spendable Interline test mWETH in this wallet."
+        />
+        <HeroMetric
+          label="Supplied"
+          value={<TokenAmount raw={supplied.toString()} decimals={6} />}
+          hint="Pool share claim on this chain. Not wallet cash."
+        />
+        <HeroMetric
+          label="Debt"
+          value={<TokenAmount raw={debt.toString()} decimals={6} />}
+          hint="Pool debt plus direct agreement debt on this chain."
+        />
+        <HeroMetric
+          label="Collateral"
+          value={<TokenAmount raw={collateral.toString()} decimals={18} digits={4} />}
+          hint="mWETH posted as pool collateral. Direct posted collateral is per agreement."
+        />
+        <HeroMetric
+          label="Lowest pool HF"
+          value={<HealthDisplay code={lowestCode} wad={lowestWad} />}
+          hint="Per isolated pool. Direct agreements are not in this number and are not liquidated on-chain."
+        />
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div>
-          <h2 className="font-[var(--font-bebas)] text-3xl tracking-tight mb-3">Supplies</h2>
-          <p className="mb-3 font-mono text-[11px] text-muted-foreground">
-            Supply is not collateral. Withdrawable cash can be less than supplied.
-          </p>
-          {supplies.length === 0 ? (
-            <p className="font-mono text-sm text-muted-foreground">No supplies on Anvil, Base Sepolia, or Ethereum Sepolia.</p>
-          ) : (
-            <ul className="space-y-3">
-              {supplies.map((s) => (
-                <li key={`${s.chainId}-${s.marketId}`} className="border border-border/50 bg-card p-4 space-y-1">
-                  <Link href={`/markets/${s.chainId}/${s.marketId}`} className="font-mono text-sm hover:text-accent">
-                    {s.label}
-                  </Link>
-                  <p className="font-mono text-xs">
-                    Supplied <TokenAmount {...s.assets} />
-                  </p>
-                  <p className="font-mono text-[11px] text-muted-foreground">
-                    Withdrawable <TokenAmount {...s.maxWithdraw} />
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
+
+      {directRequests.length > 0 ? (
+        <Link
+          href="/direct?filter=requests"
+          className="inline-flex border border-accent px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-accent"
+        >
+          Attention · {directRequests.length} request{directRequests.length === 1 ? "" : "s"} awaiting response
+        </Link>
+      ) : null}
+
+      {musdcZero ? (
+        <div className="max-w-md">
+          <TestnetFaucetButton chainId={chainId} compact />
         </div>
-        <div>
-          <h2 className="font-[var(--font-bebas)] text-3xl tracking-tight mb-3">Borrows</h2>
-          <p className="mb-3 font-mono text-[11px] text-muted-foreground">
-            Collateral is listed separately from supply. Restricted borrows do not land on the EOA.
-          </p>
-          {borrows.length === 0 ? (
-            <p className="font-mono text-sm text-muted-foreground">No borrows on Anvil, Base Sepolia, or Ethereum Sepolia.</p>
-          ) : (
-            <ul className="space-y-3">
-              {borrows.map((row) => (
-                <li key={`${row.chainId}-${row.marketId}`} className="border border-border/50 bg-card p-4 space-y-1">
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+          <PositionBlock
+            title="Pool supplies"
+            emptyCta={{ href: `/markets?chainId=${chainId}`, label: "Supply a pool" }}
+            empty={supplies.length === 0}
+            zero={<TokenAmount raw="0" decimals={6} symbol="mUSDC" />}
+          >
+            {supplies.map((s) => (
+                <li key={s.marketId} className="border border-border/50 bg-card p-4 space-y-2">
+                <Link href={`/markets/${chainId}/${s.marketId}`} className="font-mono text-sm hover:text-accent">
+                  {s.label}
+                </Link>
+                <p className="font-mono text-[28px] leading-none tabular-nums">
+                  <TokenAmount {...s.assets} />
+                </p>
+                <p className="font-mono text-[11px] text-muted-foreground">
+                  Withdrawable <TokenAmount {...s.maxWithdraw} />
+                </p>
+                <div className="flex gap-2 font-mono text-[10px] uppercase tracking-widest">
+                  <Link href={`/markets/${chainId}/${s.marketId}`} className="border border-accent px-2 py-1 text-accent">
+                    Supply
+                  </Link>
+                  <Link href={`/markets/${chainId}/${s.marketId}`} className="border border-border px-2 py-1">
+                    Withdraw
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </PositionBlock>
+          <PositionBlock
+            title="Pool borrows"
+            emptyCta={{ href: `/markets?chainId=${chainId}`, label: "Borrow" }}
+            empty={borrows.length === 0}
+            zero={<TokenAmount raw="0" decimals={6} symbol="mUSDC" />}
+          >
+            {borrows.map((row) => (
+              <li key={row.marketId} className="border border-border/50 bg-card p-4 space-y-2">
+                <Link
+                  href={`/positions/${chainId}/${row.marketId}/${address}`}
+                  className="font-mono text-sm hover:text-accent"
+                >
+                  {row.label}
+                </Link>
+                <p className="font-mono text-[28px] leading-none tabular-nums">
+                  <TokenAmount {...row.debt} />
+                </p>
+                <HealthDisplay code={row.healthCode} wad={row.healthFactorWad} liquidatable={row.liquidatable} />
+                <div className="flex gap-2 font-mono text-[10px] uppercase tracking-widest">
                   <Link
-                    href={`/positions/${row.chainId}/${row.marketId}/${address}`}
-                    className="font-mono text-sm hover:text-accent"
+                    href={`/positions/${chainId}/${row.marketId}/${address}`}
+                    className="border border-accent px-2 py-1 text-accent"
                   >
-                    {row.label}
+                    Repay
                   </Link>
-                  <p className="font-mono text-xs">
-                    Debt <TokenAmount {...row.debt} /> · Collateral USD {formatUsdFromWad(row.collateralUsdWad)}
-                  </p>
-                  <HealthDisplay code={row.healthCode} wad={row.healthFactorWad} liquidatable={row.liquidatable} />
-                  <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    {V2_CHAINS.find((c) => c.chainId === row.chainId)?.name} · {row.deliveryMode}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                  <span className="px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {row.deliveryMode}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </PositionBlock>
+          <DirectList
+            title="Direct lending"
+            empty="Create agreement"
+            emptyHref="/direct/new?intent=lend"
+            rows={directLending}
+            you="lender"
+          />
+          <DirectList
+            title="Direct borrowing"
+            empty="Request a line"
+            emptyHref="/direct/new?intent=borrow"
+            rows={directBorrowing}
+            you="borrower"
+          />
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <DirectList
-          title="Direct lending"
-          empty="No direct lending agreements."
-          rows={directLending}
-          you="lender"
-        />
-        <DirectList
-          title="Direct borrowing"
-          empty="No direct borrowing agreements."
-          rows={directBorrowing}
-          you="borrower"
-        />
-      </div>
-      <DirectList
-        title="Pending requests"
-        empty="No direct requests waiting on this wallet. Switch to the other wallet and Connect on Ethereum Sepolia, then open Direct lending."
-        rows={directRequests}
-        you="party"
-      />
+
       <div className="flex flex-wrap gap-4 font-mono text-[11px] uppercase tracking-widest">
         <Link href="/dashboard/activity" className="text-accent">
           Activity
@@ -174,56 +224,115 @@ function ConnectedDashboard({ address }: { address: `0x${string}` }) {
         <Link href="/dashboard/settings" className="text-accent">
           Settings
         </Link>
-        <Link href={`/accounts/31337/${address}`} className="text-muted-foreground hover:text-foreground">
-          Watch-only (Anvil)
-        </Link>
-        <Link href={`/accounts/11155111/${address}`} className="text-muted-foreground hover:text-foreground">
-          Watch-only (Ethereum Sepolia)
-        </Link>
+        {V2_CHAINS.filter((c) => isV2ChainId(c.chainId)).map((c) => (
+          <Link
+            key={c.chainId}
+            href={`/accounts/${c.chainId}/${address}`}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            Watch-only ({c.name})
+          </Link>
+        ))}
       </div>
     </section>
+  );
+}
+
+function PositionBlock({
+  title,
+  empty,
+  emptyCta,
+  zero,
+  children,
+}: {
+  title: string;
+  empty: boolean;
+  emptyCta: { href: string; label: string };
+  zero: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <h3 className="mb-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{title}</h3>
+      {empty ? (
+        <div className="border border-border/50 bg-card p-4 space-y-3">
+          <div className="font-mono text-[28px] leading-none tabular-nums">{zero}</div>
+          <Link href={emptyCta.href} className="inline-block border border-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent">
+            {emptyCta.label}
+          </Link>
+        </div>
+      ) : (
+        <ul className="space-y-3">{children}</ul>
+      )}
+    </div>
   );
 }
 
 function DirectList({
   title,
   empty,
+  emptyHref,
   rows,
   you,
 }: {
   title: string;
   empty: string;
+  emptyHref: string;
   rows: DirectFacilityDto[];
-  you: "lender" | "borrower" | "party";
+  you: "lender" | "borrower";
 }) {
   return (
     <div>
-      <h2 className="font-[var(--font-bebas)] text-3xl tracking-tight mb-3">{title}</h2>
-      <p className="mb-3 font-mono text-[11px] text-muted-foreground">
-        Overcollateralized restricted-use credit (max 80% LTV). Timelines below are repayment or recall, not
-        liquidation.
-      </p>
+      <h3 className="mb-2 flex items-center font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        {title}
+        <InfoTip>
+          Overcollateralized restricted-use credit at 80% LTV. Timelines are repayment or recall, not liquidation.
+        </InfoTip>
+      </h3>
       {rows.length === 0 ? (
-        <p className="font-mono text-sm text-muted-foreground">{empty}</p>
+        <div className="border border-border/50 bg-card p-4 space-y-3">
+          <div className="font-mono text-[28px] leading-none tabular-nums">
+            <TokenAmount raw="0" decimals={6} symbol="mUSDC" />
+          </div>
+          <Link href={emptyHref} className="inline-block border border-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-accent">
+            {empty}
+          </Link>
+        </div>
       ) : (
         <ul className="space-y-3">
           {rows.map((row) => (
-            <li key={`${row.chainId}-${row.facility}`} className="border border-border/50 bg-card p-4 space-y-1">
+            <li key={`${row.chainId}-${row.facility}`} className="border border-border/50 bg-card p-4 space-y-2">
               <Link href={`/direct/${row.chainId}/${row.facility}`} className="font-mono text-sm hover:text-accent">
-                {you === "lender" ? "Lending to" : you === "borrower" ? "Borrowing from" : "Request with"}{" "}
-                {you === "lender" ? row.borrower : row.lender}
+                {you === "lender" ? "To" : "From"} {shortAddr(you === "lender" ? row.borrower : row.lender)}
               </Link>
-              <p className="font-mono text-xs">
-                Outstanding <TokenAmount raw={row.debtRaw} decimals={6} symbol="mUSDC" /> · Cash{" "}
-                <TokenAmount raw={row.availableCashRaw} decimals={6} symbol="mUSDC" />
+              <p className="font-mono text-[28px] leading-none tabular-nums">
+                <TokenAmount raw={row.debtRaw} decimals={6} symbol="mUSDC" />
               </p>
               <p className="font-mono text-[11px] text-muted-foreground">
-                Repayment timeline {row.repaymentDueAt ?? "—"} · Recall timeline {row.recallDeadline ?? "not requested"}
+                Cash <TokenAmount raw={row.availableCashRaw} decimals={6} symbol="mUSDC" />
+                {" · "}
+                Due {formatUnixDate(row.repaymentDueAt)}
               </p>
+              <Link
+                href={`/direct/${row.chainId}/${row.facility}`}
+                className="inline-block border border-accent px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-accent"
+              >
+                View
+              </Link>
             </li>
           ))}
         </ul>
       )}
     </div>
   );
+}
+
+function sumRaw(raws: string[]): bigint {
+  return raws.reduce((acc, raw) => {
+    try {
+      return acc + BigInt(raw);
+    } catch {
+      return acc;
+    }
+  }, 0n);
 }

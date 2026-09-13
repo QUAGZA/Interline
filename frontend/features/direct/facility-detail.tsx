@@ -1,22 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAccount, useReadContract, useReadContracts } from "wagmi";
-import { OracleBanner, PageHeader, SourceBanner } from "@/components/ui/chrome";
+import { HeaderMeta, PageHeader } from "@/components/ui/chrome";
+import { HeroMetric } from "@/components/ui/hero-metric";
+import { WorkspaceSplit } from "@/features/layout/workspace-split";
 import { TokenAmount } from "@/features/risk/health-display";
+import { TestnetPanel } from "@/features/testnet-panel";
 import { useDirectFacilityQuery, useEventsQuery } from "@/hooks/useV2Api";
+import { useWalletCatalogBalances } from "@/hooks/useWalletCatalogBalances";
 import { AgreementLifecycleBadge, CounterpartyCard, NextActionPanel } from "./cards";
 import { DirectActions, type DialogKind } from "./actions";
 import type { DirectFacilityDto } from "./dto";
 import { nextActionText, rolesFor } from "./roles";
 import { borrowerVaultAbi, directFacilityAbi } from "@/lib/direct-abi";
-import { formatTokenUnits, shortAddr } from "@/lib/format";
+import { formatTokenUnits, formatUnixDate, shortAddr } from "@/lib/format";
 import type { Address } from "viem";
 import { toast } from "sonner";
-import { SimulatedOracleRefresh } from "@/features/simulated-oracle";
 
 const TABS = ["overview", "terms", "funds", "limits", "activity", "contract"] as const;
 type Tab = (typeof TABS)[number];
@@ -51,75 +53,103 @@ export function FacilityDetail({ chainId, facility }: { chainId: number; facilit
     chainId,
     query: { enabled: Boolean(dto?.vault) },
   });
+  const balances = useWalletCatalogBalances(chainId);
 
   if (!dto) {
     return (
       <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto">
-        <PageHeader kicker="Direct" title="AGREEMENT" description="Loading or not yet indexed." />
-        <SourceBanner usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />
+        <PageHeader size="page" kicker="Direct" title="AGREEMENT" description="Loading or not yet indexed." />
       </section>
     );
   }
 
   const roles = rolesFor(dto, address);
   const yourRole = roles.isLender ? "You are the lender" : roles.isBorrower ? "You are the borrower" : "Observer";
+  const collateralPosted = posted.data;
 
   return (
-    <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-6">
+    <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-5">
       <PageHeader
+        size="page"
         kicker="Direct lending"
         title="AGREEMENT"
-        description={`${yourRole}. Roles are per agreement — the header never shows a global lender or borrower badge.`}
-        actions={<OracleBanner />}
+        description={`${yourRole} · ${shortAddr(facility)}`}
+        actions={
+          <HeaderMeta
+            usingStub={q.data?.usingStub}
+            stale={q.data?.stale}
+            source={q.data?.source ?? (onchain ? "rpc" : undefined)}
+            extra={<ShareFacilityLink chainId={chainId} facility={facility} />}
+          />
+        }
       />
-      <SourceBanner usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source ?? (onchain ? "rpc" : undefined)} />
-      <ShareFacilityLink chainId={chainId} facility={facility} />
-      <AgreementRelationshipHeader dto={dto} address={address} />
-      <p className="font-mono text-xs text-muted-foreground">
-        Borrowing is capped at 80% of posted mWETH collateral. Direct agreements are not liquidated on-chain; recall
-        remains the recovery path.
-      </p>
-      <SimulatedOracleRefresh chainId={chainId} />
-      <NextActionPanel
-        text={nextActionText({
-          facility: dto,
-          roles,
-          idleLoan: vaultIdle.data,
-          venueShares: vaultShares.data,
-          collateralPosted: posted.data,
-          recallStarted: Boolean(dto.recallDeadline),
-        })}
+      <WorkspaceSplit
+        main={
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <HeroMetric label="Credit limit" value={<TokenAmount raw={dto.creditLimitRaw} decimals={6} />} />
+              <HeroMetric
+                label="Facility cash"
+                value={<TokenAmount raw={dto.availableCashRaw} decimals={6} />}
+                hint="Lender cash in this contract — not a pool share."
+              />
+              <HeroMetric label="Outstanding" value={<TokenAmount raw={dto.debtRaw} decimals={6} />} />
+              <HeroMetric
+                label="Posted mWETH"
+                value={collateralPosted !== undefined ? formatTokenUnits(collateralPosted, 18) : "—"}
+                hint="Borrowing is capped at 80% of posted mWETH. Direct agreements are not liquidated on-chain; recall is the recovery path."
+                subline={`Due ${formatUnixDate(dto.repaymentDueAt)}`}
+              />
+            </div>
+            <AgreementRelationshipHeader dto={dto} address={address} />
+            <nav className="flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-widest">
+              {TABS.map((t) => (
+                <Link
+                  key={t}
+                  href={`/direct/${chainId}/${facility}?tab=${t}`}
+                  className={`border px-3 py-2 ${tab === t ? "border-accent text-accent" : "border-border"}`}
+                >
+                  {t === "funds" ? "Funds" : t === "limits" ? "Limits" : t === "contract" ? "Contract" : t}
+                </Link>
+              ))}
+            </nav>
+            {tab === "overview" ? <Overview dto={dto} collateralPosted={posted.data} /> : null}
+            {tab === "terms" ? <Terms dto={dto} /> : null}
+            {tab === "funds" ? <Funds dto={dto} idleLoan={vaultIdle.data} venueShares={vaultShares.data} /> : null}
+            {tab === "limits" ? (
+              <p className="font-mono text-xs text-muted-foreground">Prepare a new limit, export it, both approve, then apply.</p>
+            ) : null}
+            {tab === "activity" ? <FacilityActivity chainId={chainId} facility={facility} /> : null}
+            {tab === "contract" ? (
+              <dl className="grid gap-2 font-mono text-xs">
+                <Row k="Facility" v={dto.facility} />
+                <Row k="Vault" v={dto.vault} />
+                <Row k="Terms hash" v={dto.termsHash} />
+                <Row k="Loan token" v={dto.asset.address} />
+              </dl>
+            ) : null}
+          </>
+        }
+        rail={
+          <>
+            <NextActionPanel
+              text={nextActionText({
+                facility: dto,
+                roles,
+                idleLoan: vaultIdle.data,
+                venueShares: vaultShares.data,
+                collateralPosted: posted.data,
+                recallStarted: Boolean(dto.recallDeadline),
+              })}
+            />
+            <p className="font-mono text-[11px] text-muted-foreground">
+              Wallet {formatTokenUnits(balances.musdc, 6)} mUSDC · {formatTokenUnits(balances.mweth, 18)} mWETH
+            </p>
+            <TestnetPanel chainId={chainId} />
+            <DirectActions facility={dto} open={open} onOpen={setOpen} collateralPosted={posted.data} />
+          </>
+        }
       />
-      <DirectActions facility={dto} open={open} onOpen={setOpen} collateralPosted={posted.data} />
-      <nav className="flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-widest">
-        {TABS.map((t) => (
-          <Link
-            key={t}
-            href={`/direct/${chainId}/${facility}?tab=${t}`}
-            className={`border px-3 py-2 ${tab === t ? "border-accent text-accent" : "border-border"}`}
-          >
-            {t === "funds" ? "Funds & venues" : t === "limits" ? "Limit requests" : t === "contract" ? "Contract details" : t}
-          </Link>
-        ))}
-      </nav>
-      {tab === "overview" ? <Overview dto={dto} collateralPosted={posted.data} /> : null}
-      {tab === "terms" ? <Terms dto={dto} /> : null}
-      {tab === "funds" ? <Funds dto={dto} idleLoan={vaultIdle.data} venueShares={vaultShares.data} /> : null}
-      {tab === "limits" ? (
-        <p className="font-mono text-xs text-muted-foreground">
-          Prepare a new limit, export it to the counterparty, both approve, then apply. Salt and hash stay in the
-          exported file, not the primary buttons.
-        </p>
-      ) : null}
-      {tab === "activity" ? <FacilityActivity chainId={chainId} facility={facility} /> : null}
-      {tab === "contract" ? (
-        <dl className="grid gap-2 font-mono text-xs">
-          <Row k="Facility" v={dto.facility} />
-          <Row k="Vault" v={dto.vault} />
-          <Row k="Terms hash" v={dto.termsHash} />
-          <Row k="Loan token" v={dto.asset.address} />
-        </dl>
-      ) : null}
     </section>
   );
 }
@@ -154,26 +184,16 @@ function AgreementRelationshipHeader({ dto, address }: { dto: DirectFacilityDto;
 
 function Overview({ dto, collateralPosted }: { dto: DirectFacilityDto; collateralPosted?: bigint }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 font-mono text-xs">
-      <Tile label="Credit limit" value={<TokenAmount raw={dto.creditLimitRaw} decimals={6} symbol="mUSDC" />} />
-      <Tile label="Available facility cash" value={<TokenAmount raw={dto.availableCashRaw} decimals={6} symbol="mUSDC" />} />
-      <Tile label="Outstanding" value={<TokenAmount raw={dto.debtRaw} decimals={6} symbol="mUSDC" />} />
-      <Tile
-        label="Accrued interest"
-        value={<TokenAmount raw={dto.accruedInterestRaw} decimals={6} symbol="mUSDC" />}
+    <dl className="grid gap-2 font-mono text-xs sm:grid-cols-2">
+      <Row k="Accrued interest" v={`${formatTokenUnits(BigInt(dto.accruedInterestRaw), 6)} mUSDC`} />
+      <Row k="Fixed APR" v={aprPct(dto.fixedAprRay)} />
+      <Row k="Repayment" v={formatUnixDate(dto.repaymentDueAt)} />
+      <Row k="Recall" v={dto.recallDeadline ? formatUnixDate(dto.recallDeadline) : "Not requested"} />
+      <Row
+        k="Posted collateral"
+        v={collateralPosted !== undefined ? `${formatTokenUnits(collateralPosted, 18)} mWETH` : "—"}
       />
-      <Tile label="Repayment timeline" value={dto.repaymentDueAt ? unix(dto.repaymentDueAt) : "After borrow expiry"} />
-      <Tile label="Recall timeline" value={dto.recallDeadline ? unix(dto.recallDeadline) : "Not requested"} />
-      <Tile label="Fixed APR" value={aprPct(dto.fixedAprRay)} />
-      <Tile
-        label="Posted collateral"
-        value={
-          collateralPosted !== undefined
-            ? `${formatTokenUnits(collateralPosted, 18)} mWETH · max 80% LTV`
-            : "Max 80% LTV"
-        }
-      />
-    </div>
+    </dl>
   );
 }
 
@@ -184,8 +204,8 @@ function Terms({ dto }: { dto: DirectFacilityDto }) {
       <Row k="Borrower" v={dto.borrower} />
       <Row k="Credit limit" v={`${dto.creditLimitRaw} base units`} />
       <Row k="Borrowing cost" v={`${aprPct(dto.fixedAprRay)} APR`} />
-      <Row k="Acceptance deadline" v={unix(dto.acceptanceDeadline)} />
-      <Row k="Borrow expiry" v={dto.borrowExpiry ? unix(dto.borrowExpiry) : "—"} />
+      <Row k="Acceptance deadline" v={formatUnixDate(dto.acceptanceDeadline)} />
+      <Row k="Borrow expiry" v={formatUnixDate(dto.borrowExpiry)} />
     </dl>
   );
 }
@@ -200,14 +220,11 @@ function Funds({
   venueShares?: bigint;
 }) {
   return (
-    <div className="space-y-2 font-mono text-xs">
-      <p>Available facility cash is the lender&apos;s accounted cash in this contract — not a pool share.</p>
-      <p>Borrowed mUSDC sits in vault {shortAddr(dto.vault)} until the borrower uses the reviewed venue.</p>
-      <p>Posted mWETH collateral lives on this agreement, not in the vault. Debt cannot exceed 80% of its value.</p>
-      <p>Vault idle {idleLoan !== undefined ? `${formatTokenUnits(idleLoan, 6)} mUSDC` : "—"} can repay without a wallet transfer.</p>
-      <p>Venue shares {venueShares !== undefined ? formatTokenUnits(venueShares, 6) : "—"} must be exited or redeemed before they can repay.</p>
-      <TokenAmount raw={dto.availableCashRaw} decimals={6} symbol="mUSDC" />
-    </div>
+    <dl className="grid gap-2 font-mono text-xs max-w-xl">
+      <Row k="Vault idle" v={idleLoan !== undefined ? `${formatTokenUnits(idleLoan, 6)} mUSDC` : "—"} />
+      <Row k="Venue shares" v={venueShares !== undefined ? formatTokenUnits(venueShares, 6) : "—"} />
+      <Row k="Vault" v={dto.vault} />
+    </dl>
   );
 }
 
@@ -229,15 +246,6 @@ function FacilityActivity({ chainId, facility }: { chainId: number; facility: st
   );
 }
 
-function Tile({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="border border-border/40 bg-card px-3 py-3">
-      <p className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</p>
-      <div className="mt-2">{value}</div>
-    </div>
-  );
-}
-
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <div className="flex justify-between gap-4 border-b border-border/30 py-2">
@@ -245,12 +253,6 @@ function Row({ k, v }: { k: string; v: string }) {
       <dd className="break-all text-right">{v}</dd>
     </div>
   );
-}
-
-function unix(raw: string) {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n === 0) return "—";
-  return new Date(n * 1000).toISOString();
 }
 
 function aprPct(ray: string) {

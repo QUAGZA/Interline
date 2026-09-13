@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { type Address, type Hex, type PublicClient } from "viem";
-import { useAccount, usePublicClient, useWalletClient } from "wagmi";
+import { useAccount, usePublicClient, useReadContract, useWalletClient } from "wagmi";
 import { toast } from "sonner";
 import { lendingMarketAbi } from "@/lib/abi-market";
 import { qk } from "@/lib/api/keys";
 import type { MarketDetailDto } from "@/lib/api/types";
 import { isLiveTokenAddress } from "@/lib/catalog";
 import { isV2ChainId } from "@/lib/chains";
-import { formatTokenUnits, parseTokenInput } from "@/lib/format";
+import { formatTokenUnits, formatUnits, parseTokenInput } from "@/lib/format";
 import { errMsg } from "@/lib/errors";
 import { useTxMachine, type TxKind } from "@/features/transactions/tx-store";
 import { runMarketTx } from "@/features/transactions/run-tx";
@@ -20,6 +20,7 @@ import { debtFromShares, quotePoolBorrow, quotePoolSupply, quotePoolWithdraw } f
 import { actionKey, latestForKey, newAttemptId, pendingForKey } from "@/lib/tx-attempt";
 import { TestnetFaucetButton } from "@/features/testnet-faucet";
 import { SimulatedOracleRefresh } from "@/features/simulated-oracle";
+import { InfoTip } from "@/components/ui/info-tip";
 
 type Tab = "supply" | "borrow" | "repay";
 type MarketCall = "supply" | "withdraw" | "borrow" | "addCollateral" | "removeCollateral" | "repay" | "repayAll";
@@ -29,18 +30,33 @@ export function MarketActions({
   owner,
   debtRaw,
   maxWithdrawRaw,
+  initialTab,
+  showTestnet = false,
 }: {
   market: MarketDetailDto;
   owner?: Address;
   debtRaw?: string;
   maxWithdrawRaw?: string;
+  initialTab?: Tab;
+  showTestnet?: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>("supply");
+  const debtWei = (() => {
+    try {
+      return debtRaw ? BigInt(debtRaw) : 0n;
+    } catch {
+      return 0n;
+    }
+  })();
+  const [tab, setTab] = useState<Tab>(initialTab ?? (debtWei > 0n ? "repay" : "supply"));
   const owed = formatOwed(debtRaw, market.loan.decimals, market.loan.symbol);
   return (
     <div className="border border-border/50 bg-card p-4 space-y-4">
-      <TestnetFaucetButton chainId={market.chainId} />
-      <SimulatedOracleRefresh chainId={market.chainId} />
+      {showTestnet ? (
+        <>
+          <TestnetFaucetButton chainId={market.chainId} />
+          <SimulatedOracleRefresh chainId={market.chainId} />
+        </>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         {(["supply", "borrow", "repay"] as const).map((t) => (
           <button
@@ -59,7 +75,8 @@ export function MarketActions({
       {tab === "supply" ? (
         <div className="space-y-4">
           <p className="font-mono text-[11px] text-muted-foreground">
-            You supply into pooled liquidity, not to a named lender. Withdrawing returns your shares as {market.loan.symbol}.
+            Pooled {market.loan.symbol}
+            <InfoTip>You supply into pooled liquidity, not to a named lender. Withdrawing returns your shares as {market.loan.symbol}.</InfoTip>
           </p>
           <ActionField
             market={market}
@@ -84,16 +101,20 @@ export function MarketActions({
             needsApprove={false}
             maxRaw={maxWithdrawRaw}
             emptyHint="Nothing supplied to withdraw"
+            allowWithdrawMax
           />
         </div>
       ) : null}
       {tab === "borrow" ? (
         <div className="space-y-4">
           <p className="font-mono text-[11px] text-muted-foreground">
-            Collateral is escrowed separately. Supplier shares are not collateral. Borrowed tokens are not collateral.
-            {market.deliveryMode === "restricted"
-              ? " Restricted mode sends borrowed mUSDC to the owner vault, not the EOA."
-              : " Wallet mode sends borrowed mUSDC to the owner wallet."}
+            Collateral then borrow
+            <InfoTip>
+              Collateral is escrowed separately. Supplier shares are not collateral. Borrowed tokens are not collateral.
+              {market.deliveryMode === "restricted"
+                ? " Restricted mode sends borrowed mUSDC to the owner vault, not the EOA."
+                : " Wallet mode sends borrowed mUSDC to the owner wallet."}
+            </InfoTip>
           </p>
           <ActionField
             market={market}
@@ -122,9 +143,8 @@ export function MarketActions({
       {tab === "repay" ? (
         <div className="space-y-4">
           <p className="font-mono text-[11px] text-muted-foreground">
-            {owed ? `You owe ${owed}. ` : "No outstanding debt. "}
-            Repayment pays this pool, not a named lender. Anyone may repay. Only the position owner can remove
-            collateral.
+            {owed ? `You owe ${owed}` : "No outstanding debt"}
+            <InfoTip>Repayment pays this pool, not a named lender. Anyone may repay. Only the position owner can remove collateral.</InfoTip>
           </p>
           <ActionField
             market={market}
@@ -181,6 +201,7 @@ function ActionField({
   emptyHint,
   debtRaw,
   allowRepayMax,
+  allowWithdrawMax,
 }: {
   market: MarketDetailDto;
   owner?: Address;
@@ -195,6 +216,7 @@ function ActionField({
   emptyHint?: string;
   debtRaw?: string;
   allowRepayMax?: boolean;
+  allowWithdrawMax?: boolean;
 }) {
   const [human, setHuman] = useState("");
   const [repayMax, setRepayMax] = useState(false);
@@ -214,13 +236,23 @@ function ActionField({
   });
   const record = latestForKey(tx.records, key);
   const busy = Boolean(pendingForKey(tx.records, key));
-  const maxWei = safeBig(maxRaw);
+  const withdrawOwner = owner ?? address;
+  const liveMaxWithdraw = useReadContract({
+    address: market.address,
+    abi: lendingMarketAbi,
+    functionName: "maxWithdraw",
+    args: withdrawOwner ? [withdrawOwner] : undefined,
+    chainId: market.chainId,
+    query: { enabled: Boolean(allowWithdrawMax && withdrawOwner), refetchInterval: 8_000 },
+  });
+  const liveMaxWei = typeof liveMaxWithdraw.data === "bigint" ? liveMaxWithdraw.data : undefined;
+  const maxWei = liveMaxWei ?? safeBig(maxRaw);
   const debtWei = safeBig(debtRaw);
   const withdrawEmpty = call === "withdraw" && maxWei === 0n;
-  const displayHuman = repayMax && debtWei > 0n ? formatTokenUnits(debtWei, decimals) : human;
+  const displayHuman = repayMax && debtWei > 0n ? formatUnits(debtWei, decimals) : human;
 
   useEffect(() => {
-    if (repayMax && debtWei > 0n) setHuman(formatTokenUnits(debtWei, decimals));
+    if (repayMax && debtWei > 0n) setHuman(formatUnits(debtWei, decimals));
   }, [repayMax, debtWei, decimals]);
 
   useEffect(() => {
@@ -364,18 +396,43 @@ function ActionField({
     }
   }
 
+  function fillWithdrawMax() {
+    if (maxWei <= 0n) {
+      toast.message(emptyHint ?? "Nothing supplied to withdraw");
+      return;
+    }
+    setHuman(formatUnits(maxWei, decimals));
+  }
+
   return (
     <div className="space-y-2">
-      <label className="block font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-        {label} ({symbol})
-        <input
-          value={displayHuman}
-          onChange={(e) => setHuman(e.target.value)}
-          inputMode="decimal"
-          disabled={repayMax || withdrawEmpty}
-          className="mt-1 w-full border border-border bg-background px-2 py-1.5 font-mono text-sm outline-none focus:border-accent disabled:opacity-50"
-        />
-      </label>
+      <div className="flex items-end gap-2">
+        <label className="block min-w-0 flex-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          {label} ({symbol})
+          <input
+            value={displayHuman}
+            onChange={(e) => setHuman(e.target.value)}
+            inputMode="decimal"
+            disabled={repayMax || withdrawEmpty}
+            className="mt-1 w-full border border-border bg-background px-2 py-1.5 font-mono text-sm outline-none focus:border-accent disabled:opacity-50"
+          />
+        </label>
+        {allowWithdrawMax ? (
+          <button
+            type="button"
+            disabled={withdrawEmpty || maxWei <= 0n}
+            onClick={fillWithdrawMax}
+            className="shrink-0 border border-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest disabled:opacity-40"
+          >
+            Max
+          </button>
+        ) : null}
+      </div>
+      {allowWithdrawMax ? (
+        <p className="font-mono text-[11px] text-muted-foreground">
+          Max is your supply converted at the current pool index (principal plus earned interest), capped by idle cash.
+        </p>
+      ) : null}
       {allowRepayMax ? (
         <label className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
           <input

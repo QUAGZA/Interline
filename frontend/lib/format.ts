@@ -46,4 +46,12 @@ export function formatDeadline(unix: bigint | undefined, nowSec: number): string
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
+/** Calendar date for repayment / recall unix seconds. Never dump the raw integer. */
+export function formatUnixDate(unix: string | bigint | number | null | undefined): string {
+  if (unix === null || unix === undefined || unix === "" || unix === 0n || unix === 0 || unix === "0") return "—";
+  const n = typeof unix === "bigint" ? Number(unix) : Number(unix);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  return new Date(n * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 export { formatUnits, parseUnits };

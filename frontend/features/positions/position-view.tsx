@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useAccount, usePublicClient, useWalletClient } from "wagmi";
 import { maxUint256, type Hex } from "viem";
 import { toast } from "sonner";
-import { OracleBanner, PageHeader, SourceBanner, TestAssetBadge } from "@/components/ui/chrome";
+import { HeaderMeta, PageHeader, TestAssetBadge } from "@/components/ui/chrome";
+import { HeroMetric } from "@/components/ui/hero-metric";
+import { InfoTip } from "@/components/ui/info-tip";
+import { WorkspaceSplit } from "@/features/layout/workspace-split";
 import { MarketActions } from "@/features/markets/market-actions";
 import { HealthDisplay, TokenAmount } from "@/features/risk/health-display";
 import { LiquidationScenarioCard, RecallClock } from "@/features/risk/liquidation-scenario";
+import { TestnetPanel } from "@/features/testnet-panel";
 import { useMarketQuery, usePositionQuery } from "@/hooks/useV2Api";
 import { lendingMarketAbi } from "@/lib/abi-market";
 import { chainName, sameAddr } from "@/lib/chains";
@@ -58,117 +61,122 @@ export function PositionView({
   ).toString();
 
   return (
-    <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-8">
+    <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-5">
       <PageHeader
-        kicker={`${chainName(chainId)} · public loan`}
+        size="page"
+        kicker={`${chainName(chainId)} · ${p.deliveryMode}`}
         title="POSITION"
-        description={`Owner ${shortAddr(owner)}. The owner can repay, remove collateral, withdraw, or borrow. Third parties may repay or add collateral.`}
-        actions={<OracleBanner />}
+        description={p.marketLabel}
+        actions={<HeaderMeta usingStub={pos.data?.usingStub} stale={pos.data?.stale} source={pos.data?.source} />}
       />
-      <SourceBanner usingStub={pos.data?.usingStub} stale={pos.data?.stale} source={pos.data?.source} />
-      <p className="font-mono text-xs">
-        {p.marketLabel} · {p.deliveryMode}
+      <p className="font-mono text-xs text-muted-foreground">
+        {shortAddr(owner)}
         {p.deliveryMode === "restricted" && p.vaultAddress ? ` · vault ${shortAddr(p.vaultAddress)}` : null}{" "}
         <TestAssetBadge />
+        {p.deliveryMode === "restricted" ? (
+          <InfoTip>Vault exposure is not extra collateral and is not an extra pool receivable.</InfoTip>
+        ) : null}
       </p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Debt" value={<TokenAmount {...p.debt} />} />
-        <Stat label="Collateral" value={<TokenAmount {...p.collateral} digits={4} />} />
-        <Stat label="Collateral USD" value={formatUsdFromWad(p.collateralUsdWad)} />
-        <Stat
+        <HeroMetric label="Debt" value={<TokenAmount {...p.debt} />} />
+        <HeroMetric label="Collateral" value={<TokenAmount {...p.collateral} digits={4} />} subline={formatUsdFromWad(p.collateralUsdWad)} />
+        <HeroMetric
           label="Health"
           value={<HealthDisplay code={p.healthCode} wad={p.healthFactorWad} liquidatable={p.liquidatable} />}
         />
-        <Stat label="Supply (this market)" value={<TokenAmount {...p.supplyAssets} />} />
-        <Stat label="Withdrawable" value={<TokenAmount {...p.maxWithdraw} />} />
-        <Stat label="Principal" value={<TokenAmount {...p.principal} />} />
-        <Stat label="Written-off" value={<TokenAmount {...p.writtenOffLiability} />} />
+        <HeroMetric
+          label="Supply"
+          value={<TokenAmount {...p.supplyAssets} />}
+          subline={
+            <>
+              Withdrawable <TokenAmount {...p.maxWithdraw} />
+            </>
+          }
+        />
       </div>
-      {p.deliveryMode === "restricted" ? (
-        <p className="font-mono text-[11px] text-muted-foreground">
-          Exposure in the vault is not extra collateral and is not an extra pool receivable.
-        </p>
-      ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-4">
-          {m && isOwner ? (
-            <div className="space-y-3">
-              {BigInt(p.debt.raw) > 0n ? (
-                <p className="font-mono text-[11px] text-accent">
-                  Next: repay partial or full from this screen, then remove collateral once debt is inside max LTV or
-                  cleared.
-                </p>
-              ) : BigInt(p.collateral.raw) > 0n ? (
-                <p className="font-mono text-[11px] text-accent">
-                  Next: no debt — remove remaining collateral from the repay tab when you want it back.
-                </p>
-              ) : null}
-              <MarketActions market={m} owner={owner} debtRaw={p.debt.raw} />
-            </div>
-          ) : null}
-          {m && !isOwner && isConnected ? (
-            <ThirdPartyActions
-              chainId={chainId}
-              marketId={marketId}
-              marketAddress={m.address}
-              owner={owner}
-              writable={Boolean(m.writable)}
-              loan={m.loan}
-              decimals={m.loan.decimals}
-              walletChainId={walletChainId}
-            />
-          ) : null}
-          {p.liquidatable && isConnected ? (
-            <LiquidateButton
-              chainId={chainId}
-              marketId={marketId}
-              marketAddress={m?.address}
-              owner={owner}
-              writable={Boolean(m?.writable)}
-              loan={m?.loan.address}
-              walletChainId={walletChainId}
-            />
-          ) : null}
-          {!isConnected ? (
-            <p className="font-mono text-xs text-muted-foreground">
-              Connect to repay, add collateral, or liquidate.{" "}
-              <Link href={`/connect?return=/positions/${chainId}/${marketId}/${owner}`} className="text-accent">
-                Connect
-              </Link>
-            </p>
-          ) : null}
-        </div>
-        <div className="space-y-4">
-          {m ? (
-            <LiquidationScenarioCard
-              healthCode={p.healthCode}
-              liquidatable={p.liquidatable}
-              oracleStatus={m.oracleStatus}
-              debtShares={p.debtShares}
-              epochIndexRay={m.epochIndexRay}
-              epochAprRay={m.borrowAprRay}
-              epochTimestamp={m.epochTimestamp}
-              recordedTimestamp={p.freshness.indexedBlockTimestamp}
-              liquidationCapacityRaw={liqCapacity}
-            />
-          ) : null}
-          <RecallClock active={p.recallActive} deadlineUnix={p.recallDeadline} nowSec={now} />
-          <Link href={`/accounts/${chainId}/${owner}`} className="block font-mono text-[11px] uppercase tracking-widest text-accent">
-            Watch-only account
-          </Link>
-        </div>
-      </div>
+      <WorkspaceSplit
+        main={
+          <>
+            <details className="border border-border/40 px-3 py-2">
+              <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                More
+              </summary>
+              <dl className="mt-3 grid gap-2 font-mono text-xs sm:grid-cols-2">
+                <div>
+                  Principal <TokenAmount {...p.principal} />
+                </div>
+                <div>
+                  Written-off <TokenAmount {...p.writtenOffLiability} />
+                </div>
+              </dl>
+            </details>
+            {m ? (
+              <LiquidationScenarioCard
+                healthCode={p.healthCode}
+                liquidatable={p.liquidatable}
+                oracleStatus={m.oracleStatus}
+                debtShares={p.debtShares}
+                epochIndexRay={m.epochIndexRay}
+                epochAprRay={m.borrowAprRay}
+                epochTimestamp={m.epochTimestamp}
+                recordedTimestamp={p.freshness.indexedBlockTimestamp}
+                liquidationCapacityRaw={liqCapacity}
+              />
+            ) : null}
+            <RecallClock active={p.recallActive} deadlineUnix={p.recallDeadline} nowSec={now} />
+            <Link href={`/accounts/${chainId}/${owner}`} className="block font-mono text-[11px] uppercase tracking-widest text-accent">
+              Watch-only account
+            </Link>
+          </>
+        }
+        rail={
+          <>
+            {m && isOwner ? <TestnetPanel chainId={chainId} /> : null}
+            {m && isOwner ? (
+              <MarketActions
+                market={m}
+                owner={owner}
+                debtRaw={p.debt.raw}
+                maxWithdrawRaw={p.maxWithdraw.raw}
+                initialTab={BigInt(p.debt.raw) > 0n ? "repay" : "supply"}
+              />
+            ) : null}
+            {m && !isOwner && isConnected ? (
+              <ThirdPartyActions
+                chainId={chainId}
+                marketId={marketId}
+                marketAddress={m.address}
+                owner={owner}
+                writable={Boolean(m.writable)}
+                loan={m.loan}
+                decimals={m.loan.decimals}
+                walletChainId={walletChainId}
+              />
+            ) : null}
+            {p.liquidatable && isConnected ? (
+              <LiquidateButton
+                chainId={chainId}
+                marketId={marketId}
+                marketAddress={m?.address}
+                owner={owner}
+                writable={Boolean(m?.writable)}
+                loan={m?.loan.address}
+                walletChainId={walletChainId}
+              />
+            ) : null}
+            {!isConnected ? (
+              <p className="font-mono text-xs text-muted-foreground">
+                Connect to repay or liquidate.{" "}
+                <Link href={`/connect?return=/positions/${chainId}/${marketId}/${owner}`} className="text-accent">
+                  Connect
+                </Link>
+              </p>
+            ) : null}
+          </>
+        }
+      />
     </section>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="border border-border/50 bg-card px-4 py-3">
-      <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">{label}</div>
-      <div className="mt-2 font-mono text-sm tabular-nums">{value}</div>
-    </div>
   );
 }
 

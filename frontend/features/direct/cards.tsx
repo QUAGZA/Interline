@@ -19,8 +19,7 @@ export function CounterpartyCard({
         {role}
         {you ? " · You" : ""}
       </p>
-      <p className="font-mono text-sm break-all">{address}</p>
-      <p className="font-mono text-xs text-muted-foreground">{shortAddr(address)}</p>
+      <p className="font-mono text-[28px] leading-none tracking-tight">{shortAddr(address)}</p>
       <div className="flex gap-3 font-mono text-[10px] uppercase tracking-widest">
         <button
           type="button"
@@ -49,12 +48,18 @@ export function MoneyMovementPreview({
   note: string;
 }) {
   return (
-    <div className="border border-border/40 bg-background/40 px-3 py-3 space-y-2">
-      <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Money movement</p>
+    <div className="space-y-2">
       <p className="font-mono text-xs">
         {fromLabel} → {toLabel}
       </p>
-      <p className="font-mono text-[11px] text-muted-foreground">{note}</p>
+      {note ? (
+        <details>
+          <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            How this works
+          </summary>
+          <p className="mt-2 font-mono text-[11px] text-muted-foreground">{note}</p>
+        </details>
+      ) : null}
     </div>
   );
 }

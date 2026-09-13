@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { runMarketTx } from "@/features/transactions/run-tx";
 import { useTxMachine } from "@/features/transactions/tx-store";
 import { TxStatusList } from "@/features/transactions/tx-status";
-import { qk } from "@/lib/api/keys";
+import { qk, walletBalancesKey } from "@/lib/api/keys";
 import { directChainConfig } from "@/lib/catalog";
 import { isV2ChainId } from "@/lib/chains";
 import { errMsg, faucetAbi } from "@/lib/errors";
@@ -97,6 +97,7 @@ export function TestnetFaucetButton({ chainId, compact = false }: { chainId: num
       toast.success("Dripped 100,000 mUSDC and 50 mWETH. Add those token addresses in the wallet if they do not appear.");
       await Promise.all([
         address && isV2ChainId(chainId) ? qc.invalidateQueries({ queryKey: qk.portfolio(chainId, address) }) : Promise.resolve(),
+        address ? qc.invalidateQueries({ queryKey: walletBalancesKey(chainId, address) }) : Promise.resolve(),
         qc.invalidateQueries({ queryKey: ["v2", "direct"] }),
       ]);
     } catch (e) {
@@ -107,8 +108,7 @@ export function TestnetFaucetButton({ chainId, compact = false }: { chainId: num
   return (
     <div className={compact ? "space-y-2" : "space-y-2 border border-border/40 px-3 py-3"}>
       <p className="font-mono text-[11px] text-muted-foreground">
-        Interline testnet drip (1h cooldown): 100,000 <span className="text-foreground">mUSDC</span> + 50 mWETH. Not
-        Circle USDC and not redeemable.
+        100,000 mUSDC + 50 mWETH · 1h cooldown · not Circle USDC
       </p>
       <button
         type="button"

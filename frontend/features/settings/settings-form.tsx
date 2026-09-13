@@ -11,7 +11,7 @@ export function SettingsForm() {
       <PageHeader
         kicker="Dashboard / Settings"
         title="SETTINGS"
-        description="Stored in this browser only. These prefs do not bind public reads to the wallet chain."
+        description="This browser only."
       />
       <label className="block font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
         Default catalog chain

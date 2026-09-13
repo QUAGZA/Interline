@@ -161,6 +161,13 @@ export const lendingMarketAbi = [
     inputs: [{ name: "owner", type: "address" }],
     outputs: [{ type: "bytes32" }],
   },
+  {
+    type: "function",
+    name: "maxWithdraw",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
   { type: "function", name: "accountedCash", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "totalSupplyShares", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "totalDebtShares", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },

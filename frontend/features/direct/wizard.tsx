@@ -155,9 +155,10 @@ export function CreationWizard({ initialIntent }: { initialIntent?: string }) {
     return (
       <section className="px-4 md:px-6 py-10 max-w-3xl mx-auto space-y-6">
         <PageHeader
+          size="page"
           kicker="Direct / New"
           title="SHARE THIS AGREEMENT"
-          description="You already accepted. The named counterparty must Connect in this app on the same chain and accept. They can open Direct lending once connected, or use the link below."
+          description="You accepted. Counterparty must Connect on this chain and open the link."
         />
         <div className="border border-border/50 bg-card p-6 space-y-4 font-mono text-xs">
           <p className="break-all">{created.url}</p>
@@ -187,9 +188,10 @@ export function CreationWizard({ initialIntent }: { initialIntent?: string }) {
   return (
     <section className="px-4 md:px-6 py-10 max-w-3xl mx-auto space-y-6">
       <PageHeader
+        size="page"
         kicker="Direct / New"
         title="CREATE AGREEMENT"
-        description="Five steps. Nothing is published until you review and send the create transaction. Roles apply only to this agreement."
+        description="Nothing is published until you send the create transaction."
       />
       <ol className="flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-widest">
         {STEPS.map((label, i) => (

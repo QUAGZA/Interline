@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { OracleBanner, PageHeader, SourceBanner } from "@/components/ui/chrome";
+import { HeaderMeta, PageHeader } from "@/components/ui/chrome";
 import { HealthDisplay, TokenAmount } from "@/features/risk/health-display";
 import { usePortfolioQuery } from "@/hooks/useV2Api";
 import { chainName, sameAddr } from "@/lib/chains";
@@ -19,12 +19,12 @@ export function WatchAccount({ chainId, address }: { chainId: V2ChainId; address
   return (
     <section className="px-4 md:px-6 py-10 max-w-6xl mx-auto space-y-6">
       <PageHeader
+        size="page"
         kicker={`${chainName(chainId)} · watch-only`}
         title="ACCOUNT"
-        description={`${shortAddr(address)} is displayed as a public portfolio. This page never treats the address as a signer.`}
-        actions={<OracleBanner />}
+        description={`${shortAddr(address)} · public portfolio`}
+        actions={<HeaderMeta usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />}
       />
-      <SourceBanner usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />
       {isSame ? (
         <p className="border border-border/50 bg-card px-3 py-2 font-mono text-[11px] text-muted-foreground">
           You are connected as this address, but this route stays watch-only. Manage positions on the{" "}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { OracleBanner, PageHeader, SourceBanner, StatusPill, TestAssetBadge } from "@/components/ui/chrome";
+import { HeaderMeta, PageHeader, StatusPill, TestAssetBadge } from "@/components/ui/chrome";
 import { useMarketsQuery } from "@/hooks/useV2Api";
 import { V2_CHAINS, parseRouteChainId } from "@/lib/chains";
 import { defaultV2ChainId } from "@/lib/config";
@@ -29,8 +29,8 @@ export function MarketsTable() {
       <PageHeader
         kicker="01 / Markets"
         title="MARKETS"
-        description="Isolated pools. Public totals. Wallet not required. Each row is one loan asset and one collateral asset."
-        actions={<OracleBanner />}
+        description="Isolated mUSDC / mWETH pools."
+        actions={<HeaderMeta usingStub={usingStub} stale={q.data?.stale} source={q.data?.source} />}
       />
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <label className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -48,7 +48,6 @@ export function MarketsTable() {
           </select>
         </label>
       </div>
-      <SourceBanner usingStub={usingStub} stale={q.data?.stale} source={q.data?.source} />
       {q.isError ? (
         <p className="mt-4 font-mono text-sm text-destructive">Market list unavailable.</p>
       ) : null}

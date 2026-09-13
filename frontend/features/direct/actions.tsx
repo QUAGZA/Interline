@@ -14,13 +14,14 @@ import { useTxMachine, type TxKind } from "@/features/transactions/tx-store";
 import { borrowerVaultAbi, directFacilityAbi } from "@/lib/direct-abi";
 import { qk } from "@/lib/api/keys";
 import { errMsg } from "@/lib/errors";
-import { formatTokenUnits, formatUsdc, parseTokenInput, parseUsdc } from "@/lib/format";
+import { formatTokenUnits, formatUnits, formatUsdc, parseTokenInput, parseUsdc } from "@/lib/format";
 import { directChainConfig } from "@/lib/catalog";
+import { availableFromLtv, borrowCapacityUsdcRaw, requiredCollateralWei } from "@/lib/direct-ltv";
 import { TxStatusList } from "@/features/transactions/tx-status";
 import { deadlineIn, maxBoundFromQuote, minBoundFromQuote, quoteDirectBorrow, quoteVenueEnter } from "@/lib/execution-bounds";
 import { actionKey, latestForKey, newAttemptId, pendingForKey } from "@/lib/tx-attempt";
 import { TestnetFaucetButton } from "@/features/testnet-faucet";
-import { SimulatedOracleRefresh } from "@/features/simulated-oracle";
+import { pairOracleAbi, SimulatedOracleRefresh } from "@/features/simulated-oracle";
 import { FocusDialog } from "@/components/focus-dialog";
 
 export type DialogKind =
@@ -208,7 +209,7 @@ export function DirectActions({
           title="Borrow into vault"
           from="Available facility cash"
           to="Borrower's restricted vault"
-          note="Tokens are not sent to the borrower EOA. Debt cannot exceed 80% of posted mWETH collateral."
+          note="Tokens go to the borrower's restricted vault, not the EOA. Max is min of 80% LTV on posted mWETH minus current debt, idle facility cash, and credit-limit headroom."
           needsApprove={false}
           onClose={() => onOpen(null)}
           write={async (assets, { publicClient }) => {
@@ -284,6 +285,72 @@ function AmountDialog({
     query: { enabled: Boolean(address) },
   });
   const walletMusdc = typeof loanBalance.data === "bigint" ? loanBalance.data : undefined;
+  const isBorrow = kind === "directBorrow";
+  const oracle = directChainConfig(facility.chainId)?.oracle;
+  const available = useReadContract({
+    address: facility.facility,
+    abi: directFacilityAbi,
+    functionName: "availableToBorrow",
+    chainId: facility.chainId,
+    query: { enabled: isBorrow, refetchInterval: 8_000 },
+  });
+  const liveDebt = useReadContract({
+    address: facility.facility,
+    abi: directFacilityAbi,
+    functionName: "currentDebt",
+    chainId: facility.chainId,
+    query: { enabled: isBorrow, refetchInterval: 8_000 },
+  });
+  const posted = useReadContract({
+    address: facility.facility,
+    abi: directFacilityAbi,
+    functionName: "collateralPosted",
+    chainId: facility.chainId,
+    query: { enabled: isBorrow, refetchInterval: 8_000 },
+  });
+  const quote = useReadContract({
+    address: oracle ?? undefined,
+    abi: pairOracleAbi,
+    functionName: "quote",
+    chainId: facility.chainId,
+    query: { enabled: isBorrow && Boolean(oracle), refetchInterval: 8_000 },
+  });
+  const maxRaw = typeof available.data === "bigint" ? available.data : undefined;
+  const debtRaw = typeof liveDebt.data === "bigint" ? liveDebt.data : safeBig(facility.debtRaw);
+  const postedRaw = typeof posted.data === "bigint" ? posted.data : 0n;
+  const quoteOk = quote.data !== undefined && Number(quote.data.status) === 0;
+  const ltvCap =
+    quoteOk && quote.data
+      ? borrowCapacityUsdcRaw(postedRaw, quote.data.collateralUsdWad, quote.data.loanUsdWad)
+      : undefined;
+  const ltvHeadroom = ltvCap !== undefined ? availableFromLtv(ltvCap, debtRaw) : undefined;
+  let typedBorrow = 0n;
+  try {
+    typedBorrow = isBorrow && human.trim() ? parseUsdc(human) : 0n;
+  } catch {
+    typedBorrow = 0n;
+  }
+  const neededWei =
+    quoteOk && quote.data && typedBorrow > 0n
+      ? requiredCollateralWei(debtRaw + typedBorrow, quote.data.collateralUsdWad, quote.data.loanUsdWad)
+      : undefined;
+
+  function fillMax() {
+    if (maxRaw === undefined) {
+      toast.message("Still reading max borrow from the agreement.");
+      return;
+    }
+    if (maxRaw === 0n) {
+      toast.error(
+        quoteOk
+          ? "Max is 0. Add mWETH collateral, wait for idle facility cash, or repay some debt."
+          : "Max is 0 until the simulated oracle is fresh. Push mainnet prices first.",
+      );
+      return;
+    }
+    setHuman(formatUnits(maxRaw, 6));
+  }
+
   return (
     <FocusDialog title={title} onClose={onClose}>
       <p className="font-mono text-sm">{title}</p>
@@ -291,23 +358,56 @@ function AmountDialog({
       {kind === "directFund" ? (
         <div className="space-y-2 font-mono text-[11px] text-muted-foreground">
           <p>
-            This agreement pulls Interline test <span className="text-foreground">mUSDC</span> at{" "}
-            <span className="break-all text-foreground">{facility.asset.address}</span>. Circle Sepolia USDC in Phantom is
-            a different token and cannot fund this contract.
-          </p>
-          <p>
-            Wallet mUSDC: {walletMusdc === undefined ? "…" : `${formatTokenUnits(walletMusdc, 6)} mUSDC`}
+            Wallet mUSDC: {walletMusdc === undefined ? "…" : `${formatTokenUnits(walletMusdc, 6)}`}
+            <span className="ml-1 text-[10px] uppercase tracking-widest">not Circle USDC</span>
           </p>
           <TestnetFaucetButton chainId={facility.chainId} compact />
         </div>
       ) : null}
-      {kind === "directBorrow" ? <SimulatedOracleRefresh chainId={facility.chainId} /> : null}
-      <input
-        value={human}
-        onChange={(e) => setHuman(e.target.value)}
-        className="w-full border border-border bg-background px-3 py-2 font-mono text-sm"
-        placeholder="Amount in mUSDC"
-      />
+      {isBorrow ? (
+        <SimulatedOracleRefresh
+          chainId={facility.chainId}
+          onRefreshed={() => {
+            void available.refetch();
+            void liveDebt.refetch();
+            void posted.refetch();
+            void quote.refetch();
+          }}
+        />
+      ) : null}
+      {isBorrow ? (
+        <p className="font-mono text-[11px] text-muted-foreground">
+          Posted {formatTokenUnits(postedRaw, 18)} mWETH · debt {formatUsdc(debtRaw)} mUSDC · cash{" "}
+          {formatUsdc(safeBig(facility.availableCashRaw))} mUSDC
+          {ltvHeadroom !== undefined ? ` · LTV headroom ${formatUsdc(ltvHeadroom)}` : ""}
+          {". Max borrow "}
+          {maxRaw === undefined ? "…" : `${formatUsdc(maxRaw)} mUSDC`}
+          {" (on-chain min of LTV, cash, credit limit)."}
+        </p>
+      ) : null}
+      <div className="flex gap-2">
+        <input
+          value={human}
+          onChange={(e) => setHuman(e.target.value)}
+          className="w-full border border-border bg-background px-3 py-2 font-mono text-sm"
+          placeholder="Amount in mUSDC"
+        />
+        {isBorrow ? (
+          <button
+            type="button"
+            className="shrink-0 border border-accent px-3 py-2 font-mono text-[10px] uppercase tracking-widest"
+            onClick={fillMax}
+          >
+            Max
+          </button>
+        ) : null}
+      </div>
+      {isBorrow && neededWei !== undefined ? (
+        <p className="font-mono text-[11px] text-muted-foreground">
+          This size plus current debt needs {formatTokenUnits(neededWei, 18)} mWETH at 80% LTV
+          {neededWei > postedRaw ? ` — short ${formatTokenUnits(neededWei - postedRaw, 18)} mWETH.` : "."}
+        </p>
+      ) : null}
       <div className="flex gap-2 font-mono text-[10px] uppercase">
         <WriteButton
           facility={facility}

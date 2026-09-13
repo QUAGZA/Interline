@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import type { Address, Hex } from "viem";
 import { useAccount, usePublicClient, useReadContract, useWalletClient } from "wagmi";
 import { toast } from "sonner";
@@ -7,10 +8,22 @@ import { runMarketTx } from "@/features/transactions/run-tx";
 import { useTxMachine } from "@/features/transactions/tx-store";
 import { TxStatusList } from "@/features/transactions/tx-status";
 import { directChainConfig } from "@/lib/catalog";
+import { borrowCapacityUsdcRaw } from "@/lib/direct-ltv";
 import { errMsg } from "@/lib/errors";
+import { formatTokenAmount } from "@/lib/money";
+import { formatUsdc } from "@/lib/format";
 import { actionKey, latestForKey, newAttemptId, pendingForKey } from "@/lib/tx-attempt";
 
 const STATUS = ["OK", "STALE", "SEQUENCER_DOWN", "INVALID", "UNAVAILABLE"] as const;
+const USDC_PEG_8 = 100_000_000n;
+
+export type MainnetFx = {
+  ethAnswer8: string;
+  usdcAnswer8: string;
+  ethUsd: number;
+  usdcUsd: number;
+  source: string;
+};
 
 export const pairOracleAbi = [
   {
@@ -47,7 +60,19 @@ export const mockFeedAbi = [
   },
 ] as const;
 
-export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
+export async function fetchMainnetFx(): Promise<MainnetFx> {
+  const res = await fetch("/api/eth-usd", { cache: "no-store" });
+  if (!res.ok) throw new Error("Mainnet ETH/USDC rate unavailable");
+  return res.json() as Promise<MainnetFx>;
+}
+
+export function SimulatedOracleRefresh({
+  chainId,
+  onRefreshed,
+}: {
+  chainId: number;
+  onRefreshed?: () => void;
+}) {
   const oracle = directChainConfig(chainId)?.oracle;
   const { address, isConnected, chainId: walletChainId } = useAccount();
   const publicClient = usePublicClient({ chainId });
@@ -60,6 +85,12 @@ export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
     chainId,
     query: { enabled: Boolean(oracle), refetchInterval: 15_000 },
   });
+  const mainnet = useQuery({
+    queryKey: ["mainnet-eth-usdc"],
+    queryFn: fetchMainnetFx,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
   const key = actionKey({
     chainId,
     account: address ?? "disconnected",
@@ -69,20 +100,26 @@ export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
   const record = latestForKey(tx.records, key);
   const busy = Boolean(pendingForKey(tx.records, key));
   if (!oracle) return null;
+  const oracleAddr = oracle;
 
   const status = quote.data ? STATUS[Number(quote.data.status)] ?? "UNAVAILABLE" : "…";
   const ok = status === "OK";
+  const simEth = quote.data ? formatTokenAmount(quote.data.collateralUsdWad, 18, undefined, 2) : "…";
+  const simUsdc = quote.data ? formatTokenAmount(quote.data.loanUsdWad, 18, undefined, 4) : "…";
+  const ltvPerWeth =
+    quote.data && quote.data.collateralUsdWad > 0n && quote.data.loanUsdWad > 0n
+      ? borrowCapacityUsdcRaw(10n ** 18n, quote.data.collateralUsdWad, quote.data.loanUsdWad)
+      : undefined;
 
-  async function pokeFeed(feed: Address, label: string) {
+  async function pokeFeed(feed: Address, label: string, nextAnswer: bigint) {
     if (!publicClient || !walletClient || !address) throw new Error("No client");
-    const answer = await publicClient.readContract({ address: feed, abi: mockFeedAbi, functionName: "answer" });
     const id = newAttemptId(`${key}:${label}`);
     tx.upsert({
       id,
       kind: "oracleRefresh",
       chainId,
       marketId: label,
-      amountRaw: "0",
+      amountRaw: nextAnswer.toString(),
       spender: feed,
       tokenSymbol: "oracle",
       phase: "editing",
@@ -105,7 +142,7 @@ export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
           address: feed,
           abi: mockFeedAbi,
           functionName: "setAnswer",
-          args: [answer],
+          args: [nextAnswer],
         });
       },
       writeAction: (): Promise<Hex> =>
@@ -114,7 +151,7 @@ export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
           address: feed,
           abi: mockFeedAbi,
           functionName: "setAnswer",
-          args: [answer],
+          args: [nextAnswer],
           chain: walletClient.chain,
         }),
     });
@@ -139,14 +176,28 @@ export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
     }
     try {
       const [collateralFeed, loanFeed] = await Promise.all([
-        publicClient.readContract({ address: oracle, abi: pairOracleAbi, functionName: "collateralUsd" }),
-        publicClient.readContract({ address: oracle, abi: pairOracleAbi, functionName: "loanUsd" }),
+        publicClient.readContract({ address: oracleAddr, abi: pairOracleAbi, functionName: "collateralUsd" }),
+        publicClient.readContract({ address: oracleAddr, abi: pairOracleAbi, functionName: "loanUsd" }),
       ]);
-      toast.message("Sign two feed updates (mWETH then mUSDC). Same simulated prices, new timestamp.");
-      await pokeFeed(collateralFeed, "weth-feed");
-      await pokeFeed(loanFeed, "usdc-feed");
+      let ethAnswer = 0n;
+      let usdcAnswer = USDC_PEG_8;
+      try {
+        const fx = await (mainnet.data ? Promise.resolve(mainnet.data) : fetchMainnetFx());
+        ethAnswer = BigInt(fx.ethAnswer8);
+        usdcAnswer = BigInt(fx.usdcAnswer8);
+        toast.message(`Sign two feed updates: mWETH $${fx.ethUsd.toFixed(2)}, mUSDC $${fx.usdcUsd.toFixed(4)} (${fx.source}).`);
+      } catch {
+        ethAnswer = await publicClient.readContract({ address: collateralFeed, abi: mockFeedAbi, functionName: "answer" });
+        usdcAnswer = await publicClient.readContract({ address: loanFeed, abi: mockFeedAbi, functionName: "answer" });
+        toast.message("Mainnet rate unavailable. Re-stamping the stored simulated prices.");
+      }
+      if (ethAnswer <= 0n) throw new Error("ETH/USD answer must be positive");
+      if (usdcAnswer <= 0n) usdcAnswer = USDC_PEG_8;
+      await pokeFeed(collateralFeed, "weth-feed", ethAnswer);
+      await pokeFeed(loanFeed, "usdc-feed", usdcAnswer);
       await quote.refetch();
-      toast.success("Simulated prices refreshed. Borrow and LTV checks can run for the next hour.");
+      onRefreshed?.();
+      toast.success("Simulated mWETH/mUSDC now tracks mainnet. LTV checks are good for the next hour.");
     } catch (e) {
       toast.error(errMsg(e));
     }
@@ -156,7 +207,18 @@ export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
     <div className="space-y-2 border border-border/40 px-3 py-3">
       <p className="font-mono text-[11px] text-muted-foreground">
         Simulated oracle: <span className={ok ? "text-foreground" : "text-destructive"}>{status}</span>
-        {ok ? ". LTV uses $2,000 mWETH / $1 mUSDC." : ". Feeds expire after 1 hour. Refresh before borrow."}
+        {". "}
+        On-chain {simEth} USD / mWETH · {simUsdc} USD / mUSDC.
+        {ltvPerWeth !== undefined ? ` 1 mWETH backs ${formatUsdc(ltvPerWeth)} mUSDC at 80% LTV.` : null}
+      </p>
+      <p className="font-mono text-[11px] text-muted-foreground">
+        Mainnet ETH/USD:{" "}
+        {mainnet.data
+          ? `$${mainnet.data.ethUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} · USDC $${mainnet.data.usdcUsd.toFixed(4)} (${mainnet.data.source})`
+          : mainnet.isError
+            ? "unavailable"
+            : "…"}
+        {ok ? "" : ". Feeds expire after 1 hour — push mainnet prices before borrow."}
       </p>
       <button
         type="button"
@@ -164,7 +226,7 @@ export function SimulatedOracleRefresh({ chainId }: { chainId: number }) {
         onClick={() => void refresh()}
         className="border border-accent px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest disabled:opacity-40"
       >
-        {busy ? record?.phase.replaceAll("_", " ") : "Refresh simulated prices"}
+        {busy ? record?.phase.replaceAll("_", " ") : "Push mainnet ETH/USDC onto feeds"}
       </button>
       {record ? <TxStatusList records={[record]} /> : null}
     </div>

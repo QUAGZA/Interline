@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { OracleBanner, PageHeader, SourceBanner } from "@/components/ui/chrome";
+import { HeaderMeta, PageHeader } from "@/components/ui/chrome";
 import { HealthDisplay, TokenAmount } from "@/features/risk/health-display";
 import { usePositionsQuery, useDirectFacilitiesQuery } from "@/hooks/useV2Api";
 import { V2_CHAINS, parseRouteChainId } from "@/lib/chains";
@@ -52,10 +52,9 @@ export function PublicDesk() {
       <PageHeader
         kicker="02 / Desk"
         title="PUBLIC DESK"
-        description="Active loans, keyed by chain, market, and owner. Direct agreements are listed separately and never share pool cash."
-        actions={<OracleBanner />}
+        description="Open pool loans and direct agreements."
+        actions={<HeaderMeta usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />}
       />
-      <SourceBanner usingStub={q.data?.usingStub} stale={q.data?.stale} source={q.data?.source} />
       <div className="mt-6 flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-widest">
         <Link
           href={hrefFor({ product: undefined })}
@@ -150,6 +149,9 @@ export function PublicDesk() {
             ))}
           </tbody>
         </table>
+        {rows.length === 0 ? (
+          <p className="p-4 font-mono text-sm text-muted-foreground">No pool loans on this chain.</p>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-3 md:hidden">

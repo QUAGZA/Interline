@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { PageHeader, SourceBanner } from "@/components/ui/chrome";
+import { HeaderMeta, PageHeader } from "@/components/ui/chrome";
 import { useEventsQuery } from "@/hooks/useV2Api";
 import { useOptionalTxMachine } from "@/features/transactions/tx-store";
 import { TxStatusList } from "@/features/transactions/tx-status";
@@ -19,11 +19,11 @@ export function ActivityFeed() {
   return (
     <section className="px-4 md:px-6 py-10 max-w-4xl mx-auto space-y-8">
       <PageHeader
+        size="page"
         kicker="Dashboard / Activity"
         title="ACTIVITY"
-        description="Indexed market events plus in-session transaction status. Session rows are keyed per operation."
+        actions={<HeaderMeta usingStub={events.data?.usingStub} stale={events.data?.stale} source={events.data?.source} />}
       />
-      <SourceBanner usingStub={events.data?.usingStub} stale={events.data?.stale} source={events.data?.source} />
       {tx && tx.records.length > 0 ? <TxStatusList records={tx.records} /> : null}
       <ul className="space-y-3">
         {items.map((e) => (
