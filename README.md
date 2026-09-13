@@ -2,7 +2,6 @@
 
 A named, bilateral credit facility between two protocols: public cap and exposure, hashed cap negotiation, venue-locked use of funds, and a recall clock when the destination gets sick.
 
-v0 is a local + testnet demo. It is **not** a pooled money market, a token, an AI risk agent, or a ZK dark pool.
 
 ## Architecture
 
